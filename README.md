@@ -83,6 +83,31 @@ part of the formulation:
 Tests mirror this: one test per variable family checking type and bounds, one
 test per constraint family checking the row count.
 
+### `local_search`
+
+How a local search is structured, mirroring the search package of the SkyGene
+engine. It is not a solver: a metaheuristic solver package (GRASP, ILS, ...)
+builds its construction, perturbation and search loop (VND, ILS, ...) on top of
+these pieces.
+
+- `move.py`: `Move` is one candidate change. It reports feasibility, a memoized
+  gain (positive means better), and `apply`, which returns a new `Solution`.
+- `move_generator.py`: `MoveGenerator.for_each_move` builds the moves of one
+  move type one at a time and hands each to a `MoveConsumer`. It stops as soon
+  as the consumer answers that it has seen enough, so a first-improvement scan
+  never enumerates the moves it will not look at. Never build the full list.
+  One generator per move type, named after it.
+- `move_consumer.py`: the acceptance rule. `BestMoveConsumer` scans everything
+  and keeps the best gain above `ZERO_TOLERANCE`; `FirstMoveConsumer` stops the
+  scan at the first improving move.
+- `neighborhood.py`: `Neighborhood.improve` composes a generator with a consumer
+  and returns the improved solution, or the very same object when nothing
+  improves, so callers detect "no improvement" by identity.
+
+Tests mirror this: consumers and neighborhoods are tested with fake moves and
+generators; each real generator gets a test on the moves it enumerates and the
+order it enumerates them in.
+
 ### `constants.py`
 
 Project-wide constants such as `ZERO_TOLERANCE`. Import them; never redefine them
