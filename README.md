@@ -41,11 +41,13 @@ idiomatic: plain dataclasses and tuples, no wrapper classes around them.
 ### `model/solution`
 
 The output side. `Solution` is a frozen dataclass holding the decisions a solver
-returns, and nothing else.
+returns, and nothing else. `SolutionFactory.build_empty`, in the same file,
+returns a solution with every collection empty; solvers report that instead of
+`None` when they found no incumbent.
 
 ### `model/solve_result.py`
 
-What a solver hands back: the problem data, the solution (or `None` when no
+What a solver hands back: the problem data, the solution (empty when no
 incumbent was found), and a `meta_data` dict for solver name, status, runtime,
 objective, bound, and whatever else the solver wants to report.
 
@@ -54,6 +56,32 @@ objective, bound, and whatever else the solver wants to report.
 `Solver` is the abstract base every algorithm implements: `solve(problem_data)`
 returns a `SolveResult`. Each algorithm lives in its own package under `solvers`
 with its own config dataclass.
+
+### `solvers/mip_solver`
+
+The direct MIP over Gurobi, split by responsibility so each file reads like one
+part of the formulation:
+
+- `mip_variables.py`: `MIPVariables` holds one private container per variable
+  family as an explicit dict, list, or nested list, and exposes each family only
+  through a `get_<family>(index)` getter. `MIPVariablesFactory.build`, in the same
+  file, calls one private `_build_<family>_vars` per family and returns the
+  `MIPVariables`. Factories are always a separate class in the same file, never
+  static methods on the class they create.
+- `mip_constraint_setter.py`: `set_constraints` calls one private
+  `_set_<constraint>` per formulation constraint. One constraint per method,
+  never several grouped into one. Each method builds `lhs` and `rhs` as explicit
+  expressions with the same sides as the paper, adds them with
+  `model.addConstr(lhs <= rhs, name=...)`, and cites its equation in a one-line
+  docstring.
+- `mip_objective_setter.py`: `set_objective` builds the objective expression and
+  sets the sense.
+- `mip_solver.py`: `MIPSolver` owns the environment, builds the model in that
+  order, optimizes, raises with an IIS file if the model is infeasible, and
+  extracts the `Solution` from variable values.
+
+Tests mirror this: one test per variable family checking type and bounds, one
+test per constraint family checking the row count.
 
 ### `constants.py`
 

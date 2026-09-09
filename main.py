@@ -7,15 +7,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from template.feasibility.feasibility_validation import FeasibilityValidation
 from template.logging_config import LogLevel, configure_logging
 from template.model.data.problem_data_parser import ProblemDataParser
+from template.solvers.mip_solver.mip_config import MIPConfig
+from template.solvers.mip_solver.mip_solver import MIPSolver
 from template.solvers.solver import Solver
 from template.validation.validation import Validation
 
 INSTANCE_PATH = Path(__file__).resolve().parent / "instances" / "example.json"
 LOG_LEVEL = LogLevel.INFO
+TIME_LIMIT_SECONDS = 300.0
 
 
 def build_solver() -> Solver:
-    raise NotImplementedError("Return the solver for this run with its config.")
+    return MIPSolver(MIPConfig(time_limit_seconds=TIME_LIMIT_SECONDS))
 
 
 def main() -> None:
@@ -25,8 +28,7 @@ def main() -> None:
     Validation.validate(problem_data)
 
     result = build_solver().solve(problem_data)
-    if result.solution is not None:
-        FeasibilityValidation.validate(result.solution, problem_data)
+    FeasibilityValidation.validate(result.solution, problem_data)
 
     logging.info("%s", result.meta_data)
 
