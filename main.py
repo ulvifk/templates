@@ -4,59 +4,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from template.model.data.data_generator.data_generator import DataGenerator
-from template.model.data.data_generator.data_generator_config import (
-    DataGeneratorConfig,
-)
-from template.model.data.problem_data import ProblemData
-from template.model.solve_result import SolveResult
-from template.solvers.mip_solver.mip_config import MIPConfig
-from template.solvers.mip_solver.mip_solver import MIPSolver
+from template.feasibility.feasibility_validation import FeasibilityValidation
+from template.logging_config import LogLevel, configure_logging
+from template.model.data.problem_data_parser import ProblemDataParser
+from template.solvers.solver import Solver
+from template.validation.validation import Validation
 
-NUM_ITEMS = 20
-NUM_RESOURCES = 8
-CAPACITY = 40
-MAX_WEIGHT = 10
-SEED = 0
-
-TIME_LIMIT_SECONDS = 300.0
+INSTANCE_PATH = Path(__file__).resolve().parent / "instances" / "example.json"
+LOG_LEVEL = LogLevel.INFO
 
 
-def configure_logging() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
-
-
-def generate_data() -> ProblemData:
-    config = DataGeneratorConfig(
-        num_items=NUM_ITEMS,
-        num_resources=NUM_RESOURCES,
-        capacity=CAPACITY,
-        max_weight=MAX_WEIGHT,
-        seed=SEED,
-    )
-    generator = DataGenerator(config)
-    return generator.generate()
-
-
-def solve_mip(problem_data: ProblemData) -> SolveResult:
-    config = MIPConfig(time_limit_seconds=TIME_LIMIT_SECONDS)
-    solver = MIPSolver(config)
-    return solver.solve(problem_data)
+def build_solver() -> Solver:
+    raise NotImplementedError("Return the solver for this run with its config.")
 
 
 def main() -> None:
-    configure_logging()
+    configure_logging(LOG_LEVEL)
 
-    problem_data = generate_data()
-    result = solve_mip(problem_data)
+    problem_data = ProblemDataParser.from_json(INSTANCE_PATH.read_text())
+    Validation.validate(problem_data)
 
-    logging.info(
-        "status=%s objective=%s bound=%s runtime=%.2fs",
-        result.status.value,
-        result.objective_value,
-        result.best_bound,
-        result.runtime_seconds,
-    )
+    result = build_solver().solve(problem_data)
+    if result.solution is not None:
+        FeasibilityValidation.validate(result.solution, problem_data)
+
+    logging.info("%s", result.meta_data)
 
 
 if __name__ == "__main__":

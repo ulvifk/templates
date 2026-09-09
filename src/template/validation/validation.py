@@ -1,27 +1,11 @@
 from typing import ClassVar
 
 from template.model.data.problem_data import ProblemData
-from template.validation.item_rules import (
-    ItemIdsMatchIndexRule,
-    PositiveItemWeightsRule,
-)
-from template.validation.problem_rules import ItemsExistRule, ResourcesExistRule
-from template.validation.resource_rules import (
-    PositiveResourceCapacitiesRule,
-    ResourceIdsMatchIndexRule,
-)
 from template.validation.validation_rule import ValidationRule
 
 
 class Validation:
-    rules: ClassVar[list[ValidationRule]] = [
-        ItemsExistRule(),
-        ResourcesExistRule(),
-        ItemIdsMatchIndexRule(),
-        PositiveItemWeightsRule(),
-        ResourceIdsMatchIndexRule(),
-        PositiveResourceCapacitiesRule(),
-    ]
+    rules: ClassVar[list[ValidationRule]] = []
 
     @staticmethod
     def validate(problem_data: ProblemData) -> None:

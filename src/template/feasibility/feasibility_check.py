@@ -5,7 +5,5 @@ from template.model.solution.solution import Solution
 
 
 class FeasibilityCheck(ABC):
-    TOLERANCE = 1e-5
-
     @abstractmethod
     def check(self, solution: Solution, problem_data: ProblemData) -> None: ...
