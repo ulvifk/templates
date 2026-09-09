@@ -8,6 +8,7 @@ packages are copied only when the project needs that technique.
 | Template | Path | Use it when |
 | --- | --- | --- |
 | MIP solver | `src/template/solvers/mip_solver` | The problem is solved directly by a MIP |
+| Branch and price | `src/template/solvers/branch_and_price_solver` | Set-partitioning style formulations with a pricing subproblem |
 | Local search | `src/template/local_search` | A metaheuristic improves solutions by moves |
 | Time-space network | `src/template/time_space_network` | The formulation is a flow over discretized time |
 
@@ -115,6 +116,68 @@ rows.
 One test per variable family checking type and bounds, one test per constraint
 family checking the row count. Row counts catch the most common formulation slip,
 a loop over the wrong index set, without needing a solved instance.
+
+### `solvers/branch_and_price_solver`
+
+A high-level template for column generation inside a branch and bound tree.
+The objective is minimized. The template provides the search and pricing loops;
+each project supplies its formulation, initialization, feasibility handling,
+branching decisions, integrality checks, and solution extraction.
+
+One column pool is shared by the tree. Each node stores its complete accumulated
+decisions in `branching_decisions: tuple[BranchingDecision, ...]`.
+The root starts with an empty tuple. `BranchingRule.get_children(node)` creates
+the children. Its `_build_child(node, decision)` helper appends the new
+decision to the inherited ones, retains the parent's lower bound, and clears
+the relaxation solution.
+
+Each project's `BranchingDecision` subclasses carry the branch choice and implement
+`is_column_compatible(column)`. The solver filters the shared pool against every
+decision on the node's path and passes the result to `_build_master(node, columns)`.
+That builder includes all supplied columns and applies the decisions to the master.
+`_build_pricing_problem(node)` applies the same decisions to the pricing formulation
+and reduced-cost calculation. A decision can add a master row, change the pricing
+structure, or do both; it need not represent a variable bound. A master row that
+only constrains combinations of columns can leave every individual column compatible.
+Both models are built fresh for each node and disposed after use.
+
+Open nodes are selected best first using the bound inherited from the parent.
+Dominated nodes are pruned before building their models. Unknown root bounds
+start at negative infinity.
+
+Column generation solves the master, prices, adds fresh columns, and repeats.
+The pricer must generate columns compatible with the node's decisions.
+An empty pricing result certifies convergence for that node. The pool only deduplicates;
+a duplicate-only batch raises because it cannot establish convergence. After
+convergence, the master reports whether the node is feasible. The template does
+not prescribe how the master establishes or restores feasibility.
+
+An integral node supplies the incumbent, and extraction runs once when the search
+ends. An exhausted tree is optimal with an incumbent and infeasible without one.
+The deadline is checked between nodes, so the time limit can overrun by one node.
+
+#### Files
+
+- `branch_and_price_config.py`: the search time limit.
+- `branch_and_price_solver.py`: the tree loop and hooks for the master, pricer,
+  branching rule, and solution extraction.
+- `branching/branch_node.py`: branching decisions, relaxation bound and
+  `master_relaxation_solution`, an integrality hook, and the root factory.
+- `branching/branching_decision.py`: branch choice data and column compatibility.
+- `branching/branching_rule/branching_rule.py`: the branching hook and child construction.
+- `branching/node_selector/`: best-first and depth-first node selection.
+- `column_generation/column.py` and `column_pool.py`: column identity and storage.
+- `column_generation/master/`: the master interface and dual data placeholder.
+- `column_generation/pricing/`: the pricing interface.
+- `column_generation/column_generation.py`: the solve-price-add loop.
+- `column_generation/column_generation_status.py` and `column_generation_result.py`:
+  convergence status, bound, and round count.
+
+#### Tests
+
+Scripted masters, pricers, and trees test the generic loops: convergence,
+deduplication, pruning, incumbent selection, bounds, infeasibility, and timeouts.
+Formulation and pricing tests belong in the project built from this template.
 
 ### `local_search`
 
