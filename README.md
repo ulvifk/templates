@@ -134,9 +134,14 @@ A high-level template for column generation inside a branch and bound tree.
 The objective is minimized. The template provides the search and pricing loops;
 each project supplies its formulation, initialization, feasibility handling,
 branching decisions, integrality checks, and solution extraction. The node
-selector, the branching rule, the master builder, the pricing builder, and the
-column generation are all supplied through `BranchAndPriceConfig`; the solver keeps
-`_extract_solution` as its one abstract method.
+selector, the branching rule, the master builder, the pricing builder, the column
+generation, the node lower bound generator, and the node incumbent generator are all
+supplied through `BranchAndPriceConfig`; the solver keeps `_extract_solution` as its
+one abstract method. The lower bound generator turns a converged node into the bound
+the node is pruned and reported with, and the incumbent generator is the primal
+heuristic run on a fractional node; both see the node's master before it is disposed.
+A project typically plugs in the relaxation bound, or its ceiling when every objective
+coefficient is integer, and either an integer restricted master heuristic or nothing.
 
 One column pool is shared by the tree. Each node stores its complete accumulated
 decisions in `branching_decisions: tuple[BranchingDecision, ...]`.
@@ -170,15 +175,19 @@ establish convergence. After convergence, the master reports whether the node is
 feasible. The template does
 not prescribe how the master establishes or restores feasibility.
 
-The master's `is_integral`, asked after convergence, decides which node supplies
-the incumbent, and extraction runs once when the search ends. An exhausted tree
+The master's `is_integral`, asked after convergence, decides whether the node
+supplies the incumbent itself; a fractional node can still supply one through the
+incumbent generator, which is only asked there, and a heuristic incumbent that
+reaches the node's bound closes the node before it branches. Extraction runs once
+when the search ends, on the incumbent's column values. An exhausted tree
 is optimal with an incumbent and infeasible without one. The deadline is checked between nodes, so
 the time limit can overrun by one node.
 
 #### Files
 
 - `branch_and_price_config.py`: the search time limit, the node selector, the
-  branching rule, the master and pricing builders, and the column generation.
+  branching rule, the master and pricing builders, the column generation, and the
+  node lower bound and incumbent generators.
 - `branch_and_price_solver.py`: the tree loop and the solution extraction hook.
 - `branching/branch_node.py`: branching decisions, relaxation bound and
   `master_relaxation_solution`, and the root factory.
@@ -197,6 +206,9 @@ the time limit can overrun by one node.
 - `column_generation/standard_column_generation.py`: the shipped solve-price-add loop.
 - `column_generation/column_generation_status.py` and `column_generation_result.py`:
   convergence status, bound, and round count.
+- `bounding/`: the node lower bound interface.
+- `incumbent/`: `Incumbent` is an objective with the column values behind it, and the
+  generator interface.
 
 #### Tests
 

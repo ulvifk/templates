@@ -11,7 +11,6 @@ from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
 )
 from template.solvers.branch_and_price_solver.branching.branch_node import (
-    BranchNode,
     BranchNodeFactory,
 )
 from template.solvers.branch_and_price_solver.column_generation.column import Column
@@ -21,6 +20,7 @@ from template.solvers.branch_and_price_solver.column_generation.column_generatio
 from template.solvers.branch_and_price_solver.column_generation.column_pool import (
     ColumnPool,
 )
+from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbent
 from template.solvers.solver import Solver
 
 
@@ -32,7 +32,7 @@ class BranchAndPriceSolver(Solver, ABC):
     _problem_data: ProblemData
     _column_pool: ColumnPool
 
-    _best_node: BranchNode | None  # the best integral node found so far
+    _incumbent: Incumbent | None  # the best integer solution found so far
     _root_bound: float
     _explored_node_count: int
 
@@ -66,22 +66,39 @@ class BranchAndPriceSolver(Solver, ABC):
             )
             pricing_problem.dispose()
 
-            node.lower_bound = result.bound
-            if self._explored_node_count == 1:
-                self._root_bound = result.bound
-
             if result.status is ColumnGenerationStatus.INFEASIBLE:
+                node.lower_bound = result.bound
+                self._record_root_bound(node.lower_bound)
                 master.dispose()
                 continue
 
             node.master_relaxation_solution = master.get_master_relaxation_solution()
+            node.lower_bound = self._config.node_lower_bound_generator.generate(
+                node, master, result
+            )
+            self._record_root_bound(node.lower_bound)
+
             integral = master.is_integral()
+            heuristic_incumbent = None
+            if not integral:
+                heuristic_incumbent = self._config.node_incumbent_generator.generate(
+                    node, master
+                )
             master.dispose()
 
             if self._is_closed_by_incumbent(node.lower_bound):
                 continue
             if integral:
-                self._best_node = node
+                self._incumbent = Incumbent(
+                    node.lower_bound, node.master_relaxation_solution
+                )
+                continue
+
+            if heuristic_incumbent is not None and self._is_better_than_incumbent(
+                heuristic_incumbent.objective
+            ):
+                self._incumbent = heuristic_incumbent
+            if self._is_closed_by_incumbent(node.lower_bound):
                 continue
 
             children = self._config.branching_rule.get_children(node)
@@ -94,7 +111,7 @@ class BranchAndPriceSolver(Solver, ABC):
 
         self._column_pool = ColumnPool()
 
-        self._best_node = None
+        self._incumbent = None
         self._root_bound = -math.inf
         self._explored_node_count = 0
 
@@ -103,28 +120,33 @@ class BranchAndPriceSolver(Solver, ABC):
 
         self._config.node_selector.push([BranchNodeFactory.build_root()])
 
+    def _record_root_bound(self, bound: float) -> None:
+        if self._explored_node_count == 1:
+            self._root_bound = bound
+
     # the objective is minimized, so a bound that reaches the incumbent proves nothing
     # below it is left: a node with such a bound is pruned, a tree with such a bound
     # is solved
     def _is_closed_by_incumbent(self, bound: float) -> bool:
         return bound >= self._get_incumbent_objective() - ZERO_TOLERANCE
 
+    def _is_better_than_incumbent(self, objective: float) -> bool:
+        return objective < self._get_incumbent_objective() - ZERO_TOLERANCE
+
     def _get_incumbent_objective(self) -> float:
-        if self._best_node is None:
+        if self._incumbent is None:
             return math.inf
 
-        return self._best_node.lower_bound
+        return self._incumbent.objective
 
-    def _get_incumbent_master_relaxation_solution(self) -> dict[Column, float]:
-        if self._best_node is None:
+    def _get_incumbent_column_values(self) -> dict[Column, float]:
+        if self._incumbent is None:
             return {}
 
-        return self._best_node.master_relaxation_solution
+        return self._incumbent.column_values
 
     def _build_result(self) -> SolveResult:
-        solution = self._extract_solution(
-            self._get_incumbent_master_relaxation_solution()
-        )
+        solution = self._extract_solution(self._get_incumbent_column_values())
 
         return SolveResult(
             problem_data=self._problem_data,
@@ -155,7 +177,7 @@ class BranchAndPriceSolver(Solver, ABC):
         return max(self._root_bound, open_bound)
 
     def _get_status(self, best_bound: float) -> str:
-        if self._best_node is None:
+        if self._incumbent is None:
             if self._config.node_selector.get_best_lower_bound() == math.inf:
                 return "infeasible"
 
@@ -165,10 +187,7 @@ class BranchAndPriceSolver(Solver, ABC):
 
         return "time-limit"
 
-    # build the solution from the incumbent's master relaxation solution, preserving
-    # its objective; an empty relaxation means no incumbent and yields the empty
-    # solution
+    # build the solution from the incumbent's column values, preserving its objective;
+    # an empty mapping means no incumbent and yields the empty solution
     @abstractmethod
-    def _extract_solution(
-        self, master_relaxation_solution: dict[Column, float]
-    ) -> Solution: ...
+    def _extract_solution(self, column_values: dict[Column, float]) -> Solution: ...

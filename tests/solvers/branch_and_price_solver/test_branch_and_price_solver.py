@@ -9,6 +9,9 @@ import pytest
 
 from template.model.data.problem_data import ProblemData
 from template.model.solution.solution import Solution
+from template.solvers.branch_and_price_solver.bounding.node_lower_bound_generator import (
+    NodeLowerBoundGenerator,
+)
 from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
 )
@@ -29,6 +32,9 @@ from template.solvers.branch_and_price_solver.branching.node_selector.best_first
     BestFirstNodeSelector,
 )
 from template.solvers.branch_and_price_solver.column_generation.column import Column
+from template.solvers.branch_and_price_solver.column_generation.column_generation_result import (
+    ColumnGenerationResult,
+)
 from template.solvers.branch_and_price_solver.column_generation.master.duals import (
     Duals,
 )
@@ -47,9 +53,14 @@ from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_
 from template.solvers.branch_and_price_solver.column_generation.standard_column_generation import (
     StandardColumnGeneration,
 )
+from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbent
+from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
+    NodeIncumbentGenerator,
+)
 
 ROOT_OBJECTIVE = 10.0
 CHILD_OBJECTIVES = (12.0, 11.0)
+HEURISTIC_OBJECTIVE = 10.5
 
 ROOT_NODE = BranchNode(
     branching_decisions=(),
@@ -64,6 +75,11 @@ class FakeColumn(Column):
 
     def get_key(self) -> Hashable:
         return self.key
+
+
+HEURISTIC_COLUMN_VALUES: dict[Column, float] = {
+    FakeColumn(cost=HEURISTIC_OBJECTIVE, key=(9,)): 1.0
+}
 
 
 class FakeMasterProblem(MasterProblem):
@@ -145,9 +161,7 @@ class NullPricingProblemBuilder(PricingProblemBuilder):
 
 
 class FakeBranchAndPriceSolver(BranchAndPriceSolver):
-    def _extract_solution(
-        self, master_relaxation_solution: dict[Column, float]
-    ) -> Solution:
+    def _extract_solution(self, column_values: dict[Column, float]) -> Solution:
         return Solution()
 
 
@@ -179,6 +193,42 @@ class FakeBranchingRule(BranchingRule):
         return children
 
 
+class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
+    """Reports the relaxation bound unchanged."""
+
+    def generate(
+        self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
+    ) -> float:
+        return result.bound
+
+
+class IncrementedLowerBoundGenerator(NodeLowerBoundGenerator):
+    """Reports a bound one unit above the relaxation."""
+
+    def generate(
+        self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
+    ) -> float:
+        return result.bound + 1.0
+
+
+class NullIncumbentGenerator(NodeIncumbentGenerator):
+    """Finds nothing on any node."""
+
+    def generate(self, node: BranchNode, master: MasterProblem) -> Incumbent | None:
+        return None
+
+
+class ScriptedIncumbentGenerator(NodeIncumbentGenerator):
+    """Finds the same scripted incumbent on every fractional node."""
+
+    def generate(self, node: BranchNode, master: MasterProblem) -> Incumbent | None:
+        return Incumbent(HEURISTIC_OBJECTIVE, HEURISTIC_COLUMN_VALUES)
+
+
+RELAXATION_LOWER_BOUND_GENERATOR = RelaxationLowerBoundGenerator()
+NULL_INCUMBENT_GENERATOR = NullIncumbentGenerator()
+
+
 def build_root() -> BranchNode:
     return ROOT_NODE
 
@@ -188,6 +238,8 @@ def solve_scripted_tree(
     time_limit_seconds: float = 1000.0,
     feasible: bool = True,
     root_is_integral: bool = False,
+    node_lower_bound_generator: NodeLowerBoundGenerator = RELAXATION_LOWER_BOUND_GENERATOR,
+    node_incumbent_generator: NodeIncumbentGenerator = NULL_INCUMBENT_GENERATOR,
 ) -> dict[str, Any]:
     monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
 
@@ -207,6 +259,8 @@ def solve_scripted_tree(
             ),
             pricing_problem_builder=NullPricingProblemBuilder(),
             column_generation=StandardColumnGeneration(),
+            node_lower_bound_generator=node_lower_bound_generator,
+            node_incumbent_generator=node_incumbent_generator,
         )
     )
 
@@ -374,6 +428,8 @@ def test_node_decisions_reach_both_builders_and_dispose_each_pricer(
             master_problem_builder=master_problem_builder,
             pricing_problem_builder=pricing_problem_builder,
             column_generation=StandardColumnGeneration(),
+            node_lower_bound_generator=RELAXATION_LOWER_BOUND_GENERATOR,
+            node_incumbent_generator=NULL_INCUMBENT_GENERATOR,
         )
     )
     monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
@@ -393,3 +449,29 @@ def test_node_decisions_reach_both_builders_and_dispose_each_pricer(
     assert len({id(pricing) for pricing in pricers}) == 3
     for pricing in pricers:
         pricing.dispose.assert_called_once_with()
+
+
+def test_the_node_lower_bound_generator_sets_the_node_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    meta_data = solve_scripted_tree(
+        monkeypatch, node_lower_bound_generator=IncrementedLowerBoundGenerator()
+    )
+
+    assert meta_data["root_bound"] == ROOT_OBJECTIVE + 1.0
+    assert meta_data["objective"] == min(CHILD_OBJECTIVES) + 1.0
+
+
+def test_a_heuristic_incumbent_closes_the_tree_and_is_extracted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    extract_solution = Mock(return_value=Solution())
+    monkeypatch.setattr(FakeBranchAndPriceSolver, "_extract_solution", extract_solution)
+
+    meta_data = solve_scripted_tree(
+        monkeypatch, node_incumbent_generator=ScriptedIncumbentGenerator()
+    )
+
+    assert meta_data["status"] == "optimal"
+    assert meta_data["objective"] == HEURISTIC_OBJECTIVE
+    extract_solution.assert_called_once_with(HEURISTIC_COLUMN_VALUES)

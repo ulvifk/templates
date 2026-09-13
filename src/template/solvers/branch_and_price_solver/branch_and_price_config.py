@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+from template.solvers.branch_and_price_solver.bounding.node_lower_bound_generator import (
+    NodeLowerBoundGenerator,
+)
 from template.solvers.branch_and_price_solver.branching.branching_rule.branching_rule import (
     BranchingRule,
 )
@@ -15,6 +18,9 @@ from template.solvers.branch_and_price_solver.column_generation.master.master_pr
 from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_problem_builder import (
     PricingProblemBuilder,
 )
+from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
+    NodeIncumbentGenerator,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,3 +32,5 @@ class BranchAndPriceConfig:
     master_problem_builder: MasterProblemBuilder
     pricing_problem_builder: PricingProblemBuilder
     column_generation: ColumnGeneration
+    node_lower_bound_generator: NodeLowerBoundGenerator
+    node_incumbent_generator: NodeIncumbentGenerator
