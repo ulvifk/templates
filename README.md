@@ -183,12 +183,42 @@ when the search ends, on the incumbent's column values. An exhausted tree
 is optimal with an incumbent and infeasible without one. The deadline is checked between nodes, so
 the time limit can overrun by one node.
 
+#### Progress logging
+
+```python
+progress = ProgressLogging()
+solver = MySolver(progress.wrap(config))
+result = solver.solve(problem_data)
+```
+
+The solver calls its components directly and reports search start, the outcome of each
+node as an `ExploredNode`, and the final `SolveResult` to the config's observers.
+`ProgressLogging.wrap` returns the config with each component replaced by a timing
+wrapper and with itself registered as an observer, so a timing measures exactly the
+component call. It builds one `NodeRecord` per node from those timings and the reported
+outcome and bounds, and hands it to `ProgressLogger`: one INFO table row per explored
+node, with a marker column: `*` the node was integral and became the incumbent, `H` the
+incumbent generator improved it and closed the node, `X` the node was infeasible, blank
+the node branched or was pruned. Components a node never reached print `-`. The summary
+line is logged when the search finishes, and at DEBUG each node also gets a
+per-component block. A project can compose the wrappers by hand instead, and one that
+wants another sink (a progress file, a database, a plot) adds its own
+`BranchAndPriceObserver` to `observers`.
+
+The progress state is reset at search start, so one `ProgressLogging` instance can be
+reused. A zero incumbent and zero bound show a `0.0%` gap; a zero incumbent with a
+nonzero bound shows `inf`, and a missing incumbent shows `-`.
+
 #### Files
 
 - `branch_and_price_config.py`: the search time limit, the node selector, the
-  branching rule, the master and pricing builders, the column generation, and the
-  node lower bound and incumbent generators.
-- `branch_and_price_solver.py`: the tree loop and the solution extraction hook.
+  branching rule, the master and pricing builders, the column generation, the
+  node lower bound and incumbent generators, and the observers.
+- `branch_and_price_solver.py`: the tree loop, the per-node exploration, and the
+  solution extraction hook.
+- `explored_node.py` and `node_outcome.py`: what one node did and how it ended.
+- `branch_and_price_observer.py`: the search-start, per-node, and end-of-search hooks
+  the solver reports to.
 - `branching/branch_node.py`: branching decisions, relaxation bound and
   `master_relaxation_solution`, and the root factory.
 - `branching/branching_decision.py`: branch choice data and column compatibility.
@@ -209,6 +239,12 @@ the time limit can overrun by one node.
 - `bounding/`: the node lower bound interface.
 - `incumbent/`: `Incumbent` is an objective with the column values behind it, and the
   generator interface.
+- `progress/`: the shipped progress logging. `node_observations.py` is what the
+  wrappers measured on the node being explored, the `timed_*.py` wrappers each time one
+  component call into it, `progress_logging.py` the observer that installs them and logs
+  a row per node, `progress_logger.py` the log calls, `node_record.py` what is logged
+  about one node, `node_component.py` the timed steps, and `progress_table.py` the
+  header, the rows, the per-node debug block, and the summary.
 
 #### Tests
 

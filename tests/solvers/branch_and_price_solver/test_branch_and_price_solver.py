@@ -233,14 +233,14 @@ def build_root() -> BranchNode:
     return ROOT_NODE
 
 
-def solve_scripted_tree(
+def build_scripted_config(
     monkeypatch: pytest.MonkeyPatch,
     time_limit_seconds: float = 1000.0,
     feasible: bool = True,
     root_is_integral: bool = False,
     node_lower_bound_generator: NodeLowerBoundGenerator = RELAXATION_LOWER_BOUND_GENERATOR,
     node_incumbent_generator: NodeIncumbentGenerator = NULL_INCUMBENT_GENERATOR,
-) -> dict[str, Any]:
+) -> BranchAndPriceConfig:
     monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
 
     ROOT_NODE.lower_bound = -math.inf
@@ -249,22 +249,40 @@ def solve_scripted_tree(
 
     objectives = {id(ROOT_NODE): ROOT_OBJECTIVE}
     integral_node_ids = {id(ROOT_NODE)} if root_is_integral else set()
-    solver = FakeBranchAndPriceSolver(
-        BranchAndPriceConfig(
-            time_limit_seconds=time_limit_seconds,
-            node_selector=BestFirstNodeSelector(),
-            branching_rule=FakeBranchingRule(objectives, integral_node_ids),
-            master_problem_builder=FakeMasterProblemBuilder(
-                objectives, integral_node_ids, feasible
-            ),
-            pricing_problem_builder=NullPricingProblemBuilder(),
-            column_generation=StandardColumnGeneration(),
-            node_lower_bound_generator=node_lower_bound_generator,
-            node_incumbent_generator=node_incumbent_generator,
-        )
+
+    return BranchAndPriceConfig(
+        time_limit_seconds=time_limit_seconds,
+        node_selector=BestFirstNodeSelector(),
+        branching_rule=FakeBranchingRule(objectives, integral_node_ids),
+        master_problem_builder=FakeMasterProblemBuilder(
+            objectives, integral_node_ids, feasible
+        ),
+        pricing_problem_builder=NullPricingProblemBuilder(),
+        column_generation=StandardColumnGeneration(),
+        node_lower_bound_generator=node_lower_bound_generator,
+        node_incumbent_generator=node_incumbent_generator,
+        observers=[],
     )
 
-    return solver.solve(ProblemData()).meta_data
+
+def solve_scripted_tree(
+    monkeypatch: pytest.MonkeyPatch,
+    time_limit_seconds: float = 1000.0,
+    feasible: bool = True,
+    root_is_integral: bool = False,
+    node_lower_bound_generator: NodeLowerBoundGenerator = RELAXATION_LOWER_BOUND_GENERATOR,
+    node_incumbent_generator: NodeIncumbentGenerator = NULL_INCUMBENT_GENERATOR,
+) -> dict[str, Any]:
+    config = build_scripted_config(
+        monkeypatch,
+        time_limit_seconds,
+        feasible,
+        root_is_integral,
+        node_lower_bound_generator,
+        node_incumbent_generator,
+    )
+
+    return FakeBranchAndPriceSolver(config).solve(ProblemData()).meta_data
 
 
 def test_the_search_keeps_the_best_of_the_integral_children(
@@ -430,6 +448,7 @@ def test_node_decisions_reach_both_builders_and_dispose_each_pricer(
             column_generation=StandardColumnGeneration(),
             node_lower_bound_generator=RELAXATION_LOWER_BOUND_GENERATOR,
             node_incumbent_generator=NULL_INCUMBENT_GENERATOR,
+            observers=[],
         )
     )
     monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)

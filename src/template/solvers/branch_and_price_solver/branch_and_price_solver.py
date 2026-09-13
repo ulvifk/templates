@@ -11,16 +11,25 @@ from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
 )
 from template.solvers.branch_and_price_solver.branching.branch_node import (
+    BranchNode,
     BranchNodeFactory,
 )
 from template.solvers.branch_and_price_solver.column_generation.column import Column
+from template.solvers.branch_and_price_solver.column_generation.column_generation_result import (
+    ColumnGenerationResult,
+)
 from template.solvers.branch_and_price_solver.column_generation.column_generation_status import (
     ColumnGenerationStatus,
 )
 from template.solvers.branch_and_price_solver.column_generation.column_pool import (
     ColumnPool,
 )
+from template.solvers.branch_and_price_solver.column_generation.master.master_problem import (
+    MasterProblem,
+)
+from template.solvers.branch_and_price_solver.explored_node import ExploredNode
 from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbent
+from template.solvers.branch_and_price_solver.node_outcome import NodeOutcome
 from template.solvers.solver import Solver
 
 
@@ -44,6 +53,7 @@ class BranchAndPriceSolver(Solver, ABC):
 
     def solve(self, problem_data: ProblemData) -> SolveResult:
         self._initialize_search(problem_data)
+        self._notify_search_started(self._started_at)
 
         while time.perf_counter() < self._deadline:
             node = self._config.node_selector.pop()
@@ -52,59 +62,13 @@ class BranchAndPriceSolver(Solver, ABC):
             if self._is_closed_by_incumbent(node.lower_bound):
                 continue
 
-            self._explored_node_count += 1
-            columns = [
-                column
-                for column in self._column_pool.get_columns()
-                if node.is_column_compatible(column)
-            ]
-            master = self._config.master_problem_builder.build(node, columns)
-            pricing_problem = self._config.pricing_problem_builder.build(node)
+            explored = self._explore_node(node)
+            self._notify_node_explored(explored)
 
-            result = self._config.column_generation.run(
-                master, pricing_problem, self._column_pool
-            )
-            pricing_problem.dispose()
+        result = self._build_result()
+        self._notify_search_finished(result)
 
-            if result.status is ColumnGenerationStatus.INFEASIBLE:
-                node.lower_bound = result.bound
-                self._record_root_bound(node.lower_bound)
-                master.dispose()
-                continue
-
-            node.master_relaxation_solution = master.get_master_relaxation_solution()
-            node.lower_bound = self._config.node_lower_bound_generator.generate(
-                node, master, result
-            )
-            self._record_root_bound(node.lower_bound)
-
-            integral = master.is_integral()
-            heuristic_incumbent = None
-            if not integral:
-                heuristic_incumbent = self._config.node_incumbent_generator.generate(
-                    node, master
-                )
-            master.dispose()
-
-            if self._is_closed_by_incumbent(node.lower_bound):
-                continue
-            if integral:
-                self._incumbent = Incumbent(
-                    node.lower_bound, node.master_relaxation_solution
-                )
-                continue
-
-            if heuristic_incumbent is not None and self._is_better_than_incumbent(
-                heuristic_incumbent.objective
-            ):
-                self._incumbent = heuristic_incumbent
-            if self._is_closed_by_incumbent(node.lower_bound):
-                continue
-
-            children = self._config.branching_rule.get_children(node)
-            self._config.node_selector.push(children)
-
-        return self._build_result()
+        return result
 
     def _initialize_search(self, problem_data: ProblemData) -> None:
         self._problem_data = problem_data
@@ -120,6 +84,96 @@ class BranchAndPriceSolver(Solver, ABC):
 
         self._config.node_selector.push([BranchNodeFactory.build_root()])
 
+    def _explore_node(self, node: BranchNode) -> ExploredNode:
+        self._explored_node_count += 1
+
+        columns = self._get_compatible_columns(node)
+        master = self._config.master_problem_builder.build(node, columns)
+        pricing_problem = self._config.pricing_problem_builder.build(node)
+
+        column_generation_result = self._config.column_generation.run(
+            master, pricing_problem, self._column_pool
+        )
+        pricing_problem.dispose()
+
+        outcome = self._evaluate_node(node, master, column_generation_result)
+
+        if outcome is NodeOutcome.BRANCHED:
+            children = self._config.branching_rule.get_children(node)
+            self._config.node_selector.push(children)
+
+        return ExploredNode(
+            node=node,
+            outcome=outcome,
+            incumbent_objective=self._get_incumbent_objective(),
+            best_bound=self._get_best_bound(),
+        )
+
+    # bounds the node, takes the incumbent it offers, and disposes its master
+    def _evaluate_node(
+        self,
+        node: BranchNode,
+        master: MasterProblem,
+        column_generation_result: ColumnGenerationResult,
+    ) -> NodeOutcome:
+        if column_generation_result.status is ColumnGenerationStatus.INFEASIBLE:
+            node.lower_bound = column_generation_result.bound
+            self._record_root_bound(node.lower_bound)
+            master.dispose()
+
+            return NodeOutcome.INFEASIBLE
+
+        node.master_relaxation_solution = master.get_master_relaxation_solution()
+        node.lower_bound = self._config.node_lower_bound_generator.generate(
+            node, master, column_generation_result
+        )
+        self._record_root_bound(node.lower_bound)
+
+        integral = master.is_integral()
+
+        heuristic_incumbent = None
+        if not integral:
+            heuristic_incumbent = self._config.node_incumbent_generator.generate(
+                node, master
+            )
+        master.dispose()
+
+        if self._is_closed_by_incumbent(node.lower_bound):
+            return NodeOutcome.PRUNED
+
+        if integral:
+            self._incumbent = Incumbent(
+                node.lower_bound, node.master_relaxation_solution
+            )
+
+            return NodeOutcome.INTEGRAL
+
+        if self._improves_incumbent(heuristic_incumbent):
+            self._incumbent = heuristic_incumbent
+            if self._is_closed_by_incumbent(node.lower_bound):
+                return NodeOutcome.HEURISTIC
+
+        return NodeOutcome.BRANCHED
+
+    def _notify_node_explored(self, explored: ExploredNode) -> None:
+        for observer in self._config.observers:
+            observer.on_node_explored(explored)
+
+    def _notify_search_started(self, started_at: float) -> None:
+        for observer in self._config.observers:
+            observer.on_search_started(started_at)
+
+    def _notify_search_finished(self, result: SolveResult) -> None:
+        for observer in self._config.observers:
+            observer.on_search_finished(result)
+
+    def _get_compatible_columns(self, node: BranchNode) -> list[Column]:
+        return [
+            column
+            for column in self._column_pool.get_columns()
+            if node.is_column_compatible(column)
+        ]
+
     def _record_root_bound(self, bound: float) -> None:
         if self._explored_node_count == 1:
             self._root_bound = bound
@@ -132,6 +186,12 @@ class BranchAndPriceSolver(Solver, ABC):
 
     def _is_better_than_incumbent(self, objective: float) -> bool:
         return objective < self._get_incumbent_objective() - ZERO_TOLERANCE
+
+    def _improves_incumbent(self, incumbent: Incumbent | None) -> bool:
+        if incumbent is None:
+            return False
+
+        return self._is_better_than_incumbent(incumbent.objective)
 
     def _get_incumbent_objective(self) -> float:
         if self._incumbent is None:

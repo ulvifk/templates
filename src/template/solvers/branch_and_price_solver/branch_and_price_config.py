@@ -3,6 +3,9 @@ from dataclasses import dataclass
 from template.solvers.branch_and_price_solver.bounding.node_lower_bound_generator import (
     NodeLowerBoundGenerator,
 )
+from template.solvers.branch_and_price_solver.branch_and_price_observer import (
+    BranchAndPriceObserver,
+)
 from template.solvers.branch_and_price_solver.branching.branching_rule.branching_rule import (
     BranchingRule,
 )
@@ -34,3 +37,5 @@ class BranchAndPriceConfig:
     column_generation: ColumnGeneration
     node_lower_bound_generator: NodeLowerBoundGenerator
     node_incumbent_generator: NodeIncumbentGenerator
+
+    observers: list[BranchAndPriceObserver]
