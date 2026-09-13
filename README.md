@@ -82,34 +82,45 @@ else.
 
 ### `solvers/mip_solver`
 
-The direct MIP over Gurobi, split by responsibility so each file reads like one
-part of the formulation. The split exists so that a reader can check a single
-constraint against the paper without scrolling through the rest of the model,
-and so that a test can build one constraint family in isolation and count its
-rows.
+The direct MIP over Gurobi, split into a solver, a model, and one setter per
+formulation part. `MIPSolver` owns everything that is the same in every project: the
+solver parameters, the optimize call, the infeasibility handling, and the
+`SolveResult`. `MIPModel` owns the Gurobi environment, the Gurobi model, and the
+formulation: it builds the variables, hands them to the constraint and objective
+setters, and reads variable values back into a `Solution`. The split exists so that a reader can check a single constraint against
+the paper without scrolling through the rest of the model, by reading one
+`_set_<constraint>` method of the constraint setter, and so that a test can build one
+constraint family in isolation and count its rows.
 
 #### Files
 
 - `mip_config.py`: the solver's parameters, a frozen dataclass.
 - `mip_variables.py`: `MIPVariables` holds one private container per variable
-  family and exposes each family only through a `get_<family>(index)` getter.
-  `MIPVariablesFactory.build`, in the same file, calls one private
-  `_build_<family>_vars` per family and returns the `MIPVariables`. The
+  family and exposes each family only through a `get_<family>(index)` getter. The
   container type is an implementation detail; nothing outside reads it.
-- `mip_constraint_setter.py`: `set_constraints` calls one private
-  `_set_<constraint>` per formulation constraint. One constraint per method,
-  never several grouped into one. Each method builds `lhs` and `rhs` as explicit
+- `mip_constraint_setter.py`: `MIPConstraintSetter.set_constraints` calls one private
+  `_set_<constraint>` per formulation constraint. One constraint per method, never
+  several grouped into one. Each method builds `lhs` and `rhs` as explicit
   expressions with the same sides as the paper, adds them with
   `model.addConstr(lhs <= rhs, name=...)`, and cites its equation in a one-line
   docstring. Keeping the sides as written makes the code diffable against the
   formulation.
-- `mip_objective_setter.py`: `set_objective` builds the objective expression and
-  sets the sense.
-- `mip_solver.py`: `MIPSolver` configures the environment, builds the model in
-  variables, constraints, objective order, optimizes, raises with an IIS file if
-  the model is infeasible, and extracts the `Solution` from variable values. An
-  infeasible model is a bug in the formulation or the instance, so it fails loudly
-  with the IIS written next to the run rather than returning an empty result.
+- `mip_objective_setter.py`: `MIPObjectiveSetter.set_objective` builds the objective
+  expression and sets the sense.
+- `mip_model.py`: `MIPModel` is the abstract formulation. It owns the Gurobi
+  environment and the Gurobi model and exposes them as `env` and `model`.
+  It takes the constraint setter and the objective setter in its constructor, and
+  `build` creates the model and then runs in variables, constraints, objective order,
+  keeping the variables for extraction. A subclass owns the two remaining hooks:
+  `_build_variables` calls one private `_build_<family>_vars` per decision family and
+  returns the `MIPVariables`, and `extract_solution` reads the variable values into a
+  `Solution`.
+- `mip_solver.py`: `MIPSolver` sets the time limit on the model's environment, starts
+  it, has the model build itself, optimizes, raises with an IIS file if the model is
+  infeasible, delegates solution extraction to the model, and records the result with
+  its meta data. An infeasible model is a bug in the formulation or the instance, so it
+  fails loudly with the IIS written next to the run rather than returning an empty
+  result.
 
 #### Tests
 

@@ -7,8 +7,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from template.feasibility.feasibility_validation import FeasibilityValidation
 from template.logging_config import LogLevel, configure_logging
 from template.model.data.problem_data_parser import ProblemDataParser
-from template.solvers.mip_solver.mip_config import MIPConfig
-from template.solvers.mip_solver.mip_solver import MIPSolver
 from template.solvers.solver import Solver
 from template.validation.validation import Validation
 
@@ -18,7 +16,11 @@ TIME_LIMIT_SECONDS = 300.0
 
 
 def build_solver() -> Solver:
-    return MIPSolver(MIPConfig(time_limit_seconds=TIME_LIMIT_SECONDS))
+    raise NotImplementedError(
+        "MIPSolver(MIPConfig(time_limit_seconds=TIME_LIMIT_SECONDS), "
+        "<project MIPModel subclass>(<project constraint setter>(), "
+        "<project objective setter>()))"
+    )
 
 
 def main() -> None:
