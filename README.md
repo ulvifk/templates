@@ -122,7 +122,10 @@ a loop over the wrong index set, without needing a solved instance.
 A high-level template for column generation inside a branch and bound tree.
 The objective is minimized. The template provides the search and pricing loops;
 each project supplies its formulation, initialization, feasibility handling,
-branching decisions, integrality checks, and solution extraction.
+branching decisions, integrality checks, and solution extraction. The node
+selector, the branching rule, the master builder, the pricing builder, and the
+column generation are all supplied through `BranchAndPriceConfig`; the solver keeps
+`_extract_solution` as its one abstract method.
 
 One column pool is shared by the tree. Each node stores its complete accumulated
 decisions in `branching_decisions: tuple[BranchingDecision, ...]`.
@@ -133,50 +136,62 @@ the relaxation solution.
 
 Each project's `BranchingDecision` subclasses carry the branch choice and implement
 `is_column_compatible(column)`. The solver filters the shared pool against every
-decision on the node's path and passes the result to `_build_master(node, columns)`.
-That builder includes all supplied columns and applies the decisions to the master.
-`_build_pricing_problem(node)` applies the same decisions to the pricing formulation
-and reduced-cost calculation. A decision can add a master row, change the pricing
-structure, or do both; it need not represent a variable bound. A master row that
-only constrains combinations of columns can leave every individual column compatible.
-Both models are built fresh for each node and disposed after use.
+decision on the node's path and passes the result to
+`MasterProblemBuilder.build(node, columns)`. That builder includes all supplied
+columns and applies the decisions to the master. `PricingProblemBuilder.build(node)`
+applies the same decisions to the pricing formulation and reduced-cost
+calculation. A decision can add a master row, change the pricing structure, or do
+both; it need not represent a variable bound. A master row that only constrains
+combinations of columns can leave every individual column compatible. Both models
+are built fresh for each node and disposed after use.
 
-Open nodes are selected best first using the bound inherited from the parent.
+Open nodes are popped from the configured node selector; best-first, which orders
+by the bound inherited from the parent, and depth-first are provided.
 Dominated nodes are pruned before building their models. Unknown root bounds
 start at negative infinity.
 
-Column generation solves the master, prices, adds fresh columns, and repeats.
-The pricer must generate columns compatible with the node's decisions.
-An empty pricing result certifies convergence for that node. The pool only deduplicates;
-a duplicate-only batch raises because it cannot establish convergence. After
-convergence, the master reports whether the node is feasible. The template does
+`StandardColumnGeneration` is the shipped loop: it solves the master, prices, adds
+fresh columns, and repeats; `ColumnGeneration` is the abstraction a project may
+replace with a loop of its own. The pricer must generate columns compatible with
+the node's decisions. An empty pricing result certifies convergence for that node.
+The pool only deduplicates; a duplicate-only batch raises because it cannot
+establish convergence. After convergence, the master reports whether the node is
+feasible. The template does
 not prescribe how the master establishes or restores feasibility.
 
-An integral node supplies the incumbent, and extraction runs once when the search
-ends. An exhausted tree is optimal with an incumbent and infeasible without one.
-The deadline is checked between nodes, so the time limit can overrun by one node.
+The master's `is_integral`, asked after convergence, decides which node supplies
+the incumbent, and extraction runs once when the search ends. An exhausted tree
+is optimal with an incumbent and infeasible without one. The deadline is checked between nodes, so
+the time limit can overrun by one node.
 
 #### Files
 
-- `branch_and_price_config.py`: the search time limit.
-- `branch_and_price_solver.py`: the tree loop and hooks for the master, pricer,
-  branching rule, and solution extraction.
+- `branch_and_price_config.py`: the search time limit, the node selector, the
+  branching rule, the master and pricing builders, and the column generation.
+- `branch_and_price_solver.py`: the tree loop and the solution extraction hook.
 - `branching/branch_node.py`: branching decisions, relaxation bound and
-  `master_relaxation_solution`, an integrality hook, and the root factory.
+  `master_relaxation_solution`, and the root factory.
 - `branching/branching_decision.py`: branch choice data and column compatibility.
 - `branching/branching_rule/branching_rule.py`: the branching hook and child construction.
 - `branching/node_selector/`: best-first and depth-first node selection.
 - `column_generation/column.py` and `column_pool.py`: column identity and storage.
-- `column_generation/master/`: the master interface and dual data placeholder.
+- `column_generation/master/`: the master interface, which also reports the node's
+  feasibility and integrality, and the dual data placeholder.
+- `column_generation/master/master_problem_builder.py`: builds a node's master from
+  the compatible columns and the node's decisions.
 - `column_generation/pricing/`: the pricing interface.
-- `column_generation/column_generation.py`: the solve-price-add loop.
+- `column_generation/pricing/pricing_problem_builder.py`: builds a node's pricer with
+  the same decisions applied.
+- `column_generation/column_generation.py`: the solve-price-add interface.
+- `column_generation/standard_column_generation.py`: the shipped solve-price-add loop.
 - `column_generation/column_generation_status.py` and `column_generation_result.py`:
   convergence status, bound, and round count.
 
 #### Tests
 
-Scripted masters, pricers, and trees test the generic loops: convergence,
-deduplication, pruning, incumbent selection, bounds, infeasibility, and timeouts.
+Components scripted through the config (masters, pricers, and trees) test the
+generic loops: convergence, deduplication, pruning, incumbent selection, bounds,
+infeasibility, and timeouts.
 Formulation and pricing tests belong in the project built from this template.
 
 ### `local_search`

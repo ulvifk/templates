@@ -23,6 +23,11 @@ class MasterProblem(ABC):
     @abstractmethod
     def is_feasible(self) -> bool: ...
 
+    # Called after pricing converges on a feasible node; whether the relaxation yields
+    # a feasible integer solution with the same objective.
+    @abstractmethod
+    def is_integral(self) -> bool: ...
+
     @abstractmethod
     def get_master_relaxation_solution(self) -> dict[Column, float]: ...
 

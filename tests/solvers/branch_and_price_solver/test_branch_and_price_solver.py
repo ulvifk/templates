@@ -25,6 +25,9 @@ from template.solvers.branch_and_price_solver.branching.branching_decision impor
 from template.solvers.branch_and_price_solver.branching.branching_rule.branching_rule import (
     BranchingRule,
 )
+from template.solvers.branch_and_price_solver.branching.node_selector.best_first_node_selector import (
+    BestFirstNodeSelector,
+)
 from template.solvers.branch_and_price_solver.column_generation.column import Column
 from template.solvers.branch_and_price_solver.column_generation.master.duals import (
     Duals,
@@ -32,27 +35,26 @@ from template.solvers.branch_and_price_solver.column_generation.master.duals imp
 from template.solvers.branch_and_price_solver.column_generation.master.master_problem import (
     MasterProblem,
 )
+from template.solvers.branch_and_price_solver.column_generation.master.master_problem_builder import (
+    MasterProblemBuilder,
+)
 from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_problem import (
     PricingProblem,
+)
+from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_problem_builder import (
+    PricingProblemBuilder,
+)
+from template.solvers.branch_and_price_solver.column_generation.standard_column_generation import (
+    StandardColumnGeneration,
 )
 
 ROOT_OBJECTIVE = 10.0
 CHILD_OBJECTIVES = (12.0, 11.0)
 
-
-@dataclass
-class FakeBranchNode(BranchNode):
-    integral: bool
-
-    def is_integral(self) -> bool:
-        return self.integral
-
-
-ROOT_NODE = FakeBranchNode(
+ROOT_NODE = BranchNode(
     branching_decisions=(),
     lower_bound=-math.inf,
     master_relaxation_solution={},
-    integral=False,
 )
 
 
@@ -69,10 +71,14 @@ class FakeMasterProblem(MasterProblem):
 
     _objective: float
     _feasible: bool
+    _integral: bool
 
-    def __init__(self, objective: float, feasible: bool = True) -> None:
+    def __init__(
+        self, objective: float, feasible: bool = True, integral: bool = False
+    ) -> None:
         self._objective = objective
         self._feasible = feasible
+        self._integral = integral
 
     def add_columns(self, columns: list[Column]) -> None:
         return None
@@ -86,6 +92,9 @@ class FakeMasterProblem(MasterProblem):
     def is_feasible(self) -> bool:
         return self._feasible
 
+    def is_integral(self) -> bool:
+        return self._integral
+
     def get_master_relaxation_solution(self) -> dict[Column, float]:
         if not self._feasible:
             raise AssertionError(
@@ -98,6 +107,30 @@ class FakeMasterProblem(MasterProblem):
         return None
 
 
+class FakeMasterProblemBuilder(MasterProblemBuilder):
+    # [id of node] -> the objective its master reports
+    _objectives: dict[int, float]
+    _integral_node_ids: set[int]
+    _feasible: bool
+
+    def __init__(
+        self,
+        objectives: dict[int, float],
+        integral_node_ids: set[int],
+        feasible: bool = True,
+    ) -> None:
+        self._objectives = objectives
+        self._integral_node_ids = integral_node_ids
+        self._feasible = feasible
+
+    def build(self, node: BranchNode, columns: list[Column]) -> MasterProblem:
+        return FakeMasterProblem(
+            self._objectives[id(node)],
+            self._feasible,
+            id(node) in self._integral_node_ids,
+        )
+
+
 class NullPricingProblem(PricingProblem):
     def price(self, duals: Duals) -> list[Column]:
         return []
@@ -106,54 +139,44 @@ class NullPricingProblem(PricingProblem):
         return None
 
 
+class NullPricingProblemBuilder(PricingProblemBuilder):
+    def build(self, node: BranchNode) -> PricingProblem:
+        return NullPricingProblem()
+
+
+class FakeBranchAndPriceSolver(BranchAndPriceSolver):
+    def _extract_solution(
+        self, master_relaxation_solution: dict[Column, float]
+    ) -> Solution:
+        return Solution()
+
+
 class FakeBranchingRule(BranchingRule):
     """Splits the root into two integral children and stops there."""
 
     # [id of node] -> the objective its master reports
     _objectives: dict[int, float]
+    _integral_node_ids: set[int]
 
-    def __init__(self, objectives: dict[int, float]) -> None:
+    def __init__(
+        self, objectives: dict[int, float], integral_node_ids: set[int]
+    ) -> None:
         self._objectives = objectives
+        self._integral_node_ids = integral_node_ids
 
     def get_children(self, node: BranchNode) -> list[BranchNode]:
         children: list[BranchNode] = []
         for objective in CHILD_OBJECTIVES:
-            child = FakeBranchNode(
+            child = BranchNode(
                 branching_decisions=node.branching_decisions,
                 lower_bound=node.lower_bound,
                 master_relaxation_solution={},
-                integral=True,
             )
             self._objectives[id(child)] = objective
+            self._integral_node_ids.add(id(child))
             children.append(child)
 
         return children
-
-
-class FakeBranchAndPriceSolver(BranchAndPriceSolver):
-    # [id of node] -> the objective its master reports
-    _objectives: dict[int, float]
-    _feasible: bool
-
-    def __init__(self, config: BranchAndPriceConfig, feasible: bool = True) -> None:
-        super().__init__(config)
-
-        self._objectives = {id(ROOT_NODE): ROOT_OBJECTIVE}
-        self._feasible = feasible
-
-    def _build_master(self, node: BranchNode, columns: list[Column]) -> MasterProblem:
-        return FakeMasterProblem(self._objectives[id(node)], self._feasible)
-
-    def _build_pricing_problem(self, node: BranchNode) -> PricingProblem:
-        return NullPricingProblem()
-
-    def _build_branching_rule(self) -> BranchingRule:
-        return FakeBranchingRule(self._objectives)
-
-    def _extract_solution(
-        self, master_relaxation_solution: dict[Column, float]
-    ) -> Solution:
-        return Solution()
 
 
 def build_root() -> BranchNode:
@@ -164,6 +187,7 @@ def solve_scripted_tree(
     monkeypatch: pytest.MonkeyPatch,
     time_limit_seconds: float = 1000.0,
     feasible: bool = True,
+    root_is_integral: bool = False,
 ) -> dict[str, Any]:
     monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
 
@@ -171,9 +195,19 @@ def solve_scripted_tree(
     ROOT_NODE.branching_decisions = ()
     ROOT_NODE.master_relaxation_solution = {}
 
+    objectives = {id(ROOT_NODE): ROOT_OBJECTIVE}
+    integral_node_ids = {id(ROOT_NODE)} if root_is_integral else set()
     solver = FakeBranchAndPriceSolver(
-        BranchAndPriceConfig(time_limit_seconds=time_limit_seconds),
-        feasible,
+        BranchAndPriceConfig(
+            time_limit_seconds=time_limit_seconds,
+            node_selector=BestFirstNodeSelector(),
+            branching_rule=FakeBranchingRule(objectives, integral_node_ids),
+            master_problem_builder=FakeMasterProblemBuilder(
+                objectives, integral_node_ids, feasible
+            ),
+            pricing_problem_builder=NullPricingProblemBuilder(),
+            column_generation=StandardColumnGeneration(),
+        )
     )
 
     return solver.solve(ProblemData()).meta_data
@@ -272,7 +306,6 @@ def test_integral_aggregates_preserve_fractional_columns_for_extraction(
         FakeColumn(cost=10.0, key=(2,)): 0.5,
     }
     extract_solution = Mock(return_value=Solution())
-    monkeypatch.setattr(ROOT_NODE, "integral", True)
     monkeypatch.setattr(
         FakeMasterProblem,
         "get_master_relaxation_solution",
@@ -280,7 +313,7 @@ def test_integral_aggregates_preserve_fractional_columns_for_extraction(
     )
     monkeypatch.setattr(FakeBranchAndPriceSolver, "_extract_solution", extract_solution)
 
-    meta_data = solve_scripted_tree(monkeypatch)
+    meta_data = solve_scripted_tree(monkeypatch, root_is_integral=True)
 
     extract_solution.assert_called_once_with(master_relaxation_solution)
     assert meta_data["objective"] == 10.0
@@ -307,50 +340,56 @@ def test_node_decisions_reach_both_builders_and_dispose_each_pricer(
         column.get_key() != (1,)
     )
 
-    left = FakeBranchNode(
+    left = BranchNode(
         branching_decisions=(left_decision, second_left_decision),
         lower_bound=-math.inf,
         master_relaxation_solution={},
-        integral=True,
     )
-    right = FakeBranchNode(
+    right = BranchNode(
         branching_decisions=(right_decision,),
         lower_bound=-math.inf,
         master_relaxation_solution={},
-        integral=True,
     )
     branching_rule = Mock(spec=BranchingRule)
     branching_rule.get_children.return_value = [left, right]
 
-    solver = FakeBranchAndPriceSolver(BranchAndPriceConfig(time_limit_seconds=1000.0))
-    monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
-    monkeypatch.setattr(
-        solver, "_build_branching_rule", Mock(return_value=branching_rule)
-    )
-
-    master_builder = Mock(
-        side_effect=[
-            FakeMasterProblem(10.0),
-            FakeMasterProblem(12.0),
-            FakeMasterProblem(11.0, feasible=False),
-        ]
-    )
-    monkeypatch.setattr(solver, "_build_master", master_builder)
+    master_problem_builder = Mock(spec=MasterProblemBuilder)
+    master_problem_builder.build.side_effect = [
+        FakeMasterProblem(10.0),
+        FakeMasterProblem(12.0, integral=True),
+        FakeMasterProblem(11.0, feasible=False),
+    ]
     pricers = [Mock(spec=PricingProblem) for _ in range(3)]
     pricers[0].price.side_effect = [columns, []]
     pricers[1].price.return_value = []
     pricers[2].price.return_value = []
-    pricing_builder = Mock(side_effect=pricers)
-    monkeypatch.setattr(solver, "_build_pricing_problem", pricing_builder)
+    pricing_problem_builder = Mock(spec=PricingProblemBuilder)
+    pricing_problem_builder.build.side_effect = pricers
+
+    solver = FakeBranchAndPriceSolver(
+        BranchAndPriceConfig(
+            time_limit_seconds=1000.0,
+            node_selector=BestFirstNodeSelector(),
+            branching_rule=branching_rule,
+            master_problem_builder=master_problem_builder,
+            pricing_problem_builder=pricing_problem_builder,
+            column_generation=StandardColumnGeneration(),
+        )
+    )
+    monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
 
     solver.solve(ProblemData())
 
-    assert master_builder.call_args_list == [
+    assert master_problem_builder.build.call_args_list == [
         call(ROOT_NODE, []),
         call(left, [columns[0]]),
         call(right, columns[1:]),
     ]
-    assert pricing_builder.call_args_list == [call(ROOT_NODE), call(left), call(right)]
+    assert pricing_problem_builder.build.call_args_list == [
+        call(ROOT_NODE),
+        call(left),
+        call(right),
+    ]
     assert len({id(pricing) for pricing in pricers}) == 3
     for pricing in pricers:
         pricing.dispose.assert_called_once_with()

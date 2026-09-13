@@ -5,9 +5,6 @@ from dataclasses import dataclass
 import pytest
 
 from template.solvers.branch_and_price_solver.column_generation.column import Column
-from template.solvers.branch_and_price_solver.column_generation.column_generation import (
-    ColumnGeneration,
-)
 from template.solvers.branch_and_price_solver.column_generation.column_generation_status import (
     ColumnGenerationStatus,
 )
@@ -22,6 +19,9 @@ from template.solvers.branch_and_price_solver.column_generation.master.master_pr
 )
 from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_problem import (
     PricingProblem,
+)
+from template.solvers.branch_and_price_solver.column_generation.standard_column_generation import (
+    StandardColumnGeneration,
 )
 
 
@@ -62,6 +62,9 @@ class ScriptedMasterProblem(MasterProblem):
     def is_feasible(self) -> bool:
         return self._feasible
 
+    def is_integral(self) -> bool:
+        return False
+
     def get_master_relaxation_solution(self) -> dict[Column, float]:
         return {}
 
@@ -94,7 +97,7 @@ def test_column_generation_converges_after_pricing_returns_no_columns() -> None:
     master = ScriptedMasterProblem([201.0, 101.0])
     pricer = ScriptedPricingProblem([[column], []])
 
-    result = ColumnGeneration(pricer, ColumnPool()).run(master)
+    result = StandardColumnGeneration().run(master, pricer, ColumnPool())
 
     assert result.status is ColumnGenerationStatus.CONVERGED
     assert result.bound == 101.0
@@ -106,7 +109,7 @@ def test_pricing_convergence_with_an_infeasible_master_is_infeasible() -> None:
     master = ScriptedMasterProblem([1.0], feasible=False)
     pricer = ScriptedPricingProblem([[]])
 
-    result = ColumnGeneration(pricer, ColumnPool()).run(master)
+    result = StandardColumnGeneration().run(master, pricer, ColumnPool())
 
     assert result.status is ColumnGenerationStatus.INFEASIBLE
     assert result.bound == math.inf
@@ -121,7 +124,7 @@ def test_only_known_columns_raise_instead_of_certifying_convergence() -> None:
     pricer = ScriptedPricingProblem([[known]])
 
     with pytest.raises(RuntimeError, match="only known columns"):
-        ColumnGeneration(pricer, pool).run(master)
+        StandardColumnGeneration().run(master, pricer, pool)
 
 
 def test_duplicate_columns_are_deduplicated_before_reaching_the_master() -> None:
@@ -132,7 +135,7 @@ def test_duplicate_columns_are_deduplicated_before_reaching_the_master() -> None
     master = ScriptedMasterProblem([20.0, 15.0])
     pricer = ScriptedPricingProblem([[known, fresh], []])
 
-    result = ColumnGeneration(pricer, pool).run(master)
+    result = StandardColumnGeneration().run(master, pricer, pool)
 
     assert result.status is ColumnGenerationStatus.CONVERGED
     assert master.added_columns == [fresh]

@@ -9,7 +9,8 @@ from template.solvers.branch_and_price_solver.branching.branching_decision impor
 
 class BranchingRule(ABC):
     # returns the children that split the node's fractionality, read from the node's
-    # master relaxation solution; only called when node.is_integral() is False
+    # master relaxation solution; only called when the master found the node
+    # fractional
     @abstractmethod
     def get_children(self, node: BranchNode) -> list[BranchNode]: ...
 

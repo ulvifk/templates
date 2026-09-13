@@ -24,12 +24,6 @@ class BranchNode:
             for decision in self.branching_decisions
         )
 
-    def is_integral(self) -> bool:
-        raise NotImplementedError(
-            "Return whether the relaxation yields a feasible integer solution "
-            "with the same objective."
-        )
-
 
 class BranchNodeFactory:
     @staticmethod
