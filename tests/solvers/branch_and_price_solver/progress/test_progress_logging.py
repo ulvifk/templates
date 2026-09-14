@@ -1,5 +1,6 @@
 import logging
 import math
+from collections.abc import Hashable
 from dataclasses import replace
 
 import pytest
@@ -8,6 +9,9 @@ from template.model.data.problem_data import ProblemData
 from template.model.solve_result import SolveResult
 from template.solvers.branch_and_price_solver.branch_and_price_observer import (
     BranchAndPriceObserver,
+)
+from template.solvers.branch_and_price_solver.branching.branch_node import (
+    BranchNodeFactory,
 )
 from template.solvers.branch_and_price_solver.column_generation.column import Column
 from template.solvers.branch_and_price_solver.column_generation.column_generation import (
@@ -47,6 +51,9 @@ from template.solvers.branch_and_price_solver.progress.progress_table import (
 )
 from template.solvers.branch_and_price_solver.progress.timed_column_generation import (
     TimedColumnGeneration,
+)
+from template.solvers.branch_and_price_solver.progress.timed_master_problem import (
+    TimedMasterProblem,
 )
 from tests.solvers.branch_and_price_solver import (
     test_branch_and_price_solver as solver_tests,
@@ -127,6 +134,20 @@ class ScriptedColumnGeneration(ColumnGeneration):
         )
 
 
+class CapableMasterProblem(FakeMasterProblem):
+    """A project master with one capability a decision calls."""
+
+    bounded_keys: list[Hashable]
+
+    def __init__(self) -> None:
+        super().__init__(objective=1.0)
+
+        self.bounded_keys = []
+
+    def bound_column(self, key: Hashable) -> None:
+        self.bounded_keys.append(key)
+
+
 def get_node_rows(messages: list[str]) -> list[str]:
     header_lines = ProgressTable.format_header().splitlines()
 
@@ -143,10 +164,10 @@ def get_node_rows(messages: list[str]) -> list[str]:
 
 
 def test_the_logging_writes_one_row_per_node_under_a_single_header(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.INFO)
-    config = ProgressLogging().wrap(build_scripted_config(monkeypatch))
+    config = ProgressLogging().wrap(build_scripted_config())
 
     FakeBranchAndPriceSolver(config).solve(ProblemData())
 
@@ -158,11 +179,9 @@ def test_the_logging_writes_one_row_per_node_under_a_single_header(
     assert messages[-1].startswith(f"{SUMMARY_PREFIX}: objective 11.00")
 
 
-def test_every_explored_node_reaches_the_observer_with_its_outcome(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_every_explored_node_reaches_the_observer_with_its_outcome() -> None:
     observer = RecordingObserver()
-    config = replace(build_scripted_config(monkeypatch), observers=[observer])
+    config = replace(build_scripted_config(), observers=[observer])
 
     result = FakeBranchAndPriceSolver(config).solve(ProblemData())
 
@@ -197,6 +216,15 @@ def test_the_timed_column_generation_records_the_rounds_and_the_new_columns() ->
     assert observations.seconds_by_component[NodeComponent.COLUMN_GENERATION] >= 0.0
 
 
+def test_the_timed_master_problem_forwards_project_capabilities() -> None:
+    inner = CapableMasterProblem()
+    timed = TimedMasterProblem(inner, NodeObservations())
+
+    timed.bound_column((1,))
+
+    assert inner.bounded_keys == [(1,)]
+
+
 def test_zero_objective_logging_does_not_crash_when_info_is_disabled(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -204,7 +232,7 @@ def test_zero_objective_logging_does_not_crash_when_info_is_disabled(
     monkeypatch.setattr(solver_tests, "CHILD_OBJECTIVES", (0.0, 0.0))
     caplog.set_level(logging.WARNING)
 
-    config = ProgressLogging().wrap(build_scripted_config(monkeypatch))
+    config = ProgressLogging().wrap(build_scripted_config())
 
     result = FakeBranchAndPriceSolver(config).solve(ProblemData())
 
@@ -217,17 +245,17 @@ def test_zero_objective_gap_has_explicit_values() -> None:
 
 
 def test_progress_logging_resets_for_each_search(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.INFO)
     progress = ProgressLogging()
 
-    first_config = progress.wrap(build_scripted_config(monkeypatch))
+    first_config = progress.wrap(build_scripted_config())
     FakeBranchAndPriceSolver(first_config).solve(ProblemData())
     first_messages = [record.getMessage() for record in caplog.records]
 
     caplog.clear()
-    second_config = progress.wrap(build_scripted_config(monkeypatch))
+    second_config = progress.wrap(build_scripted_config())
     FakeBranchAndPriceSolver(second_config).solve(ProblemData())
     second_messages = [record.getMessage() for record in caplog.records]
 
@@ -250,7 +278,7 @@ def test_progress_logging_uses_the_solver_start_time_for_elapsed_rows(
     progress.on_search_started(15.0)
     progress.on_node_explored(
         ExploredNode(
-            node=solver_tests.ROOT_NODE,
+            node=BranchNodeFactory.build_root(),
             outcome=NodeOutcome.INFEASIBLE,
             incumbent_objective=math.inf,
             best_bound=math.inf,
@@ -268,7 +296,7 @@ def test_progress_table_reports_integrality_for_a_pruned_integral_node(
     caplog.set_level(logging.DEBUG)
 
     observer = RecordingObserver()
-    config = replace(build_scripted_config(monkeypatch), observers=[observer])
+    config = replace(build_scripted_config(), observers=[observer])
     config = ProgressLogging().wrap(config)
 
     FakeBranchAndPriceSolver(config).solve(ProblemData())

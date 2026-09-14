@@ -150,16 +150,57 @@ the children. Its `_build_child(node, decision)` helper appends the new
 decision to the inherited ones, retains the parent's lower bound, and clears
 the relaxation solution.
 
-Each project's `BranchingDecision` subclasses carry the branch choice and implement
-`is_column_compatible(column)`. The solver filters the shared pool against every
-decision on the node's path and passes the result to
-`MasterProblemBuilder.build(node, columns)`. That builder includes all supplied
-columns and applies the decisions to the master. `PricingProblemBuilder.build(node)`
-applies the same decisions to the pricing formulation and reduced-cost
-calculation. A decision can add a master row, change the pricing structure, or do
-both; it need not represent a variable bound. A master row that only constrains
-combinations of columns can leave every individual column compatible. Both models
-are built fresh for each node and disposed after use.
+Each project's `BranchingDecision` subclasses carry the branch choice and enforce it
+themselves; the builders, the master, the pricer, the column generation, and `Duals`
+never inspect a decision. A decision implements three methods:
+`is_column_compatible(column)` filters the shared pool, `apply_to_master(master)`
+enforces the choice on the node's master once its columns are in, and
+`apply_to_pricing(pricing_problem)` enforces it on the node's pricer. The solver
+calls the last two once per node, after the builders return and before column
+generation starts. `BranchingDecision[M, P]` is generic in the master and pricer
+capabilities it needs. Use small `Protocol` interfaces for these capabilities: a
+model satisfies the interface by implementing its methods, without inheriting from
+it. A decision can bound a column, add a master row, change what may be
+priced, or do all of these; a row that only constrains combinations of columns leaves
+every individual column compatible.
+
+`MasterProblemBuilder.build(columns)` and `PricingProblemBuilder.build()` are the
+project seams: they build the node's master over the compatible columns and the
+node's pricer, both with no decision applied. Both models are built fresh for each
+node and disposed after use.
+
+Branching implementations belong to the project. Define the model capabilities a
+decision needs and extend `Duals` with the data the master and pricer exchange.
+The template does not prescribe rows, dual keys, or a particular branching method.
+New rules using existing capabilities leave the builders, models, column generation,
+and solver unchanged. A rule needing a new capability adds that operation to the
+relevant model implementations.
+
+A node already holds multiple decisions. It checks column compatibility against
+all of them and applies them to each model in order. A project can put several
+restrictions inside its own decision when they describe one branch choice.
+The branching rule creates the children that cover the parent's feasible solutions.
+
+#### Combining implementations
+
+`CompositePricingProblem(pricing_problems)` combines a nonempty list of exact
+pricing subproblems. Each round calls every subproblem with the same duals, joins
+their columns, and removes duplicate keys in first-seen order. It returns no columns
+only when all subproblems return none. The subproblems together must cover the node's
+whole pricing domain, and each must certify convergence for its own domain. The
+composite owns their disposal; each supplied instance must be distinct.
+
+Project-specific capability forwarding is explicit. A project can subclass
+`CompositePricingProblem[MyPricingProblem]` and forward its capability methods to
+the appropriate items returned by `get_pricing_problems()`. A generic group cannot
+decide which subproblem should receive a domain restriction.
+
+To replace a component, implement its interface and supply it through
+`BranchAndPriceConfig` or the relevant builder. Simple data such as nodes, duals,
+and results stays concrete; projects extend it where needed. No registry or
+component-type checks are needed in the search loop. The config uses the core model
+interfaces, so it does not statically check optional decision capabilities. Test
+each project's configured models with the decisions its branching rules produce.
 
 Open nodes are popped from the configured node selector; best-first, which orders
 by the bound inherited from the parent, and depth-first are provided.
@@ -167,9 +208,10 @@ Dominated nodes are pruned before building their models. Unknown root bounds
 start at negative infinity.
 
 `StandardColumnGeneration` is the shipped loop: it solves the master, prices, adds
-fresh columns, and repeats; `ColumnGeneration` is the abstraction a project may
-replace with a loop of its own. The pricer must generate columns compatible with
-the node's decisions. An empty pricing result certifies convergence for that node.
+fresh columns, and repeats, and never sees a decision; `ColumnGeneration` is the
+abstraction a project may replace with a loop of its own. The pricer must generate
+columns compatible with the node's decisions. An empty pricing result certifies
+convergence for that node.
 The pool only deduplicates; a duplicate-only batch raises because it cannot
 establish convergence. After convergence, the master reports whether the node is
 feasible. The template does
@@ -195,15 +237,17 @@ The solver calls its components directly and reports search start, the outcome o
 node as an `ExploredNode`, and the final `SolveResult` to the config's observers.
 `ProgressLogging.wrap` returns the config with each component replaced by a timing
 wrapper and with itself registered as an observer, so a timing measures exactly the
-component call. It builds one `NodeRecord` per node from those timings and the reported
-outcome and bounds, and hands it to `ProgressLogger`: one INFO table row per explored
-node, with a marker column: `*` the node was integral and became the incumbent, `H` the
-incumbent generator improved it and closed the node, `X` the node was infeasible, blank
-the node branched or was pruned. Components a node never reached print `-`. The summary
-line is logged when the search finishes, and at DEBUG each node also gets a
-per-component block. A project can compose the wrappers by hand instead, and one that
-wants another sink (a progress file, a database, a plot) adds its own
-`BranchAndPriceObserver` to `observers`.
+component call. `TimedMasterProblem` forwards the project master's capability methods
+it does not know, so the node's decisions can be applied through it. `ProgressLogging`
+builds one `NodeRecord` per node from those timings and the reported outcome and
+bounds, and hands it to `ProgressLogger`: one INFO table row per explored node, with a
+marker column: `*` the node was integral and became the incumbent, `H` the incumbent
+generator improved it and closed the node, `X` the node was infeasible, blank the node
+branched or was pruned. Components a node never reached print `-`. The summary line is
+logged when the search finishes, and at DEBUG each node also gets a per-component
+block. A project can compose the wrappers by hand instead, and one that wants another
+sink (a progress file, a database, a plot) adds its own `BranchAndPriceObserver` to
+`observers`.
 
 The progress state is reset at search start, so one `ProgressLogging` instance can be
 reused. A zero incumbent and zero bound show a `0.0%` gap; a zero incumbent with a
@@ -214,24 +258,27 @@ nonzero bound shows `inf`, and a missing incumbent shows `-`.
 - `branch_and_price_config.py`: the search time limit, the node selector, the
   branching rule, the master and pricing builders, the column generation, the
   node lower bound and incumbent generators, and the observers.
-- `branch_and_price_solver.py`: the tree loop, the per-node exploration, and the
-  solution extraction hook.
+- `branch_and_price_solver.py`: the tree loop, the per-node exploration, which
+  applies the node's decisions to its models, and the solution extraction hook.
 - `explored_node.py` and `node_outcome.py`: what one node did and how it ended.
 - `branch_and_price_observer.py`: the search-start, per-node, and end-of-search hooks
   the solver reports to.
 - `branching/branch_node.py`: branching decisions, relaxation bound and
   `master_relaxation_solution`, and the root factory.
-- `branching/branching_decision.py`: branch choice data and column compatibility.
+- `branching/branching_decision.py`: the branch choice that filters columns and
+  enforces itself on the master and the pricer.
 - `branching/branching_rule/branching_rule.py`: the branching hook and child construction.
 - `branching/node_selector/`: best-first and depth-first node selection.
 - `column_generation/column.py` and `column_pool.py`: column identity and storage.
 - `column_generation/master/`: the master interface, which also reports the node's
-  feasibility and integrality, and the dual data placeholder.
-- `column_generation/master/master_problem_builder.py`: builds a node's master from
-  the compatible columns and the node's decisions.
+  feasibility and integrality, and `duals.py`, the dual data a project defines.
+- `column_generation/master/master_problem_builder.py`: builds a node's master over
+  the compatible columns, with no decision applied.
 - `column_generation/pricing/`: the pricing interface.
+- `column_generation/pricing/composite_pricing_problem.py`: combines pricing
+  subproblems and disposes them together.
 - `column_generation/pricing/pricing_problem_builder.py`: builds a node's pricer with
-  the same decisions applied.
+  no decision applied.
 - `column_generation/column_generation.py`: the solve-price-add interface.
 - `column_generation/standard_column_generation.py`: the shipped solve-price-add loop.
 - `column_generation/column_generation_status.py` and `column_generation_result.py`:
@@ -251,6 +298,11 @@ nonzero bound shows `inf`, and a missing incumbent shows `-`.
 Components scripted through the config (masters, pricers, and trees) test the
 generic loops: convergence, deduplication, pruning, incumbent selection, bounds,
 infeasibility, and timeouts.
+`test_branching_extensions.py` is a working example with a small covering master
+and finite pricing subproblems. Its rows, decisions, and dual data are defined only
+in the example. It checks multiple node decisions, coefficients for
+initial and priced columns, changing row duals, and convergence, with progress
+logging both enabled and disabled. It needs no optimization solver license.
 Formulation and pricing tests belong in the project built from this template.
 
 ### `local_search`

@@ -88,8 +88,10 @@ class BranchAndPriceSolver(Solver, ABC):
         self._explored_node_count += 1
 
         columns = self._get_compatible_columns(node)
-        master = self._config.master_problem_builder.build(node, columns)
-        pricing_problem = self._config.pricing_problem_builder.build(node)
+        master = self._config.master_problem_builder.build(columns)
+        node.apply_to_master(master)
+        pricing_problem = self._config.pricing_problem_builder.build()
+        node.apply_to_pricing(pricing_problem)
 
         column_generation_result = self._config.column_generation.run(
             master, pricing_problem, self._column_pool

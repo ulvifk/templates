@@ -1,4 +1,5 @@
 from time import perf_counter
+from typing import Any
 
 from template.solvers.branch_and_price_solver.column_generation.column import Column
 from template.solvers.branch_and_price_solver.column_generation.master.duals import (
@@ -52,3 +53,7 @@ class TimedMasterProblem(MasterProblem):
 
     def dispose(self) -> None:
         self._inner.dispose()
+
+    # decisions call the project master's capabilities through the wrapper
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)

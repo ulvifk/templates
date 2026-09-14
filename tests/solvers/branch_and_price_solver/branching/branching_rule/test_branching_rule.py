@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from template.solvers.branch_and_price_solver.branching.branch_node import (
     BranchNode,
@@ -17,11 +17,19 @@ from template.solvers.branch_and_price_solver.column_generation.column import Co
 
 @dataclass(frozen=True, slots=True)
 class FakeBranchingDecision(BranchingDecision):
+    """Enforces itself by name on a mock master and a mock pricer."""
+
     name: str
     compatible: bool = True
 
     def is_column_compatible(self, column: Column) -> bool:
         return self.compatible
+
+    def apply_to_master(self, master: Mock) -> None:
+        master.enforce(self.name)
+
+    def apply_to_pricing(self, pricing_problem: Mock) -> None:
+        pricing_problem.enforce(self.name)
 
 
 class FakeBranchingRule(BranchingRule):
@@ -69,3 +77,29 @@ def test_a_node_accepts_a_column_only_when_every_decision_accepts_it() -> None:
     node.branching_decisions = (accepted, rejected)
 
     assert not node.is_column_compatible(column)
+
+
+def test_a_node_enforces_every_decision_on_the_master_in_path_order() -> None:
+    master = Mock()
+    node = BranchNodeFactory.build_root()
+    node.branching_decisions = (
+        FakeBranchingDecision("first"),
+        FakeBranchingDecision("second"),
+    )
+
+    node.apply_to_master(master)
+
+    assert master.enforce.call_args_list == [call("first"), call("second")]
+
+
+def test_a_node_enforces_every_decision_on_the_pricer_in_path_order() -> None:
+    pricer = Mock()
+    node = BranchNodeFactory.build_root()
+    node.branching_decisions = (
+        FakeBranchingDecision("first"),
+        FakeBranchingDecision("second"),
+    )
+
+    node.apply_to_pricing(pricer)
+
+    assert pricer.enforce.call_args_list == [call("first"), call("second")]

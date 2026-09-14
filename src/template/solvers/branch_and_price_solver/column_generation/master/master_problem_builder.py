@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 
-from template.solvers.branch_and_price_solver.branching.branch_node import BranchNode
 from template.solvers.branch_and_price_solver.column_generation.column import Column
 from template.solvers.branch_and_price_solver.column_generation.master.master_problem import (
     MasterProblem,
@@ -8,7 +7,7 @@ from template.solvers.branch_and_price_solver.column_generation.master.master_pr
 
 
 class MasterProblemBuilder(ABC):
-    # Build the master with all supplied compatible columns and apply
-    # node.branching_decisions to its formulation.
+    # the restricted master over the compatible columns, with no decision applied; the
+    # solver applies the node's decisions to it
     @abstractmethod
-    def build(self, node: BranchNode, columns: list[Column]) -> MasterProblem: ...
+    def build(self, columns: list[Column]) -> MasterProblem: ...

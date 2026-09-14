@@ -1,9 +1,9 @@
 import math
 import time
-from collections.abc import Hashable
+from collections.abc import Hashable, Iterator
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import Mock, call
+from unittest.mock import ANY, Mock, call
 
 import pytest
 
@@ -32,8 +32,14 @@ from template.solvers.branch_and_price_solver.branching.node_selector.best_first
     BestFirstNodeSelector,
 )
 from template.solvers.branch_and_price_solver.column_generation.column import Column
+from template.solvers.branch_and_price_solver.column_generation.column_generation import (
+    ColumnGeneration,
+)
 from template.solvers.branch_and_price_solver.column_generation.column_generation_result import (
     ColumnGenerationResult,
+)
+from template.solvers.branch_and_price_solver.column_generation.column_generation_status import (
+    ColumnGenerationStatus,
 )
 from template.solvers.branch_and_price_solver.column_generation.master.duals import (
     Duals,
@@ -61,12 +67,6 @@ from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator
 ROOT_OBJECTIVE = 10.0
 CHILD_OBJECTIVES = (12.0, 11.0)
 HEURISTIC_OBJECTIVE = 10.5
-
-ROOT_NODE = BranchNode(
-    branching_decisions=(),
-    lower_bound=-math.inf,
-    master_relaxation_solution={},
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,27 +124,15 @@ class FakeMasterProblem(MasterProblem):
 
 
 class FakeMasterProblemBuilder(MasterProblemBuilder):
-    # [id of node] -> the objective its master reports
-    _objectives: dict[int, float]
-    _integral_node_ids: set[int]
-    _feasible: bool
+    """Hands out the scripted masters in exploration order."""
 
-    def __init__(
-        self,
-        objectives: dict[int, float],
-        integral_node_ids: set[int],
-        feasible: bool = True,
-    ) -> None:
-        self._objectives = objectives
-        self._integral_node_ids = integral_node_ids
-        self._feasible = feasible
+    _masters: Iterator[MasterProblem]
 
-    def build(self, node: BranchNode, columns: list[Column]) -> MasterProblem:
-        return FakeMasterProblem(
-            self._objectives[id(node)],
-            self._feasible,
-            id(node) in self._integral_node_ids,
-        )
+    def __init__(self, masters: list[MasterProblem]) -> None:
+        self._masters = iter(masters)
+
+    def build(self, columns: list[Column]) -> MasterProblem:
+        return next(self._masters)
 
 
 class NullPricingProblem(PricingProblem):
@@ -156,7 +144,7 @@ class NullPricingProblem(PricingProblem):
 
 
 class NullPricingProblemBuilder(PricingProblemBuilder):
-    def build(self, node: BranchNode) -> PricingProblem:
+    def build(self) -> PricingProblem:
         return NullPricingProblem()
 
 
@@ -166,31 +154,17 @@ class FakeBranchAndPriceSolver(BranchAndPriceSolver):
 
 
 class FakeBranchingRule(BranchingRule):
-    """Splits the root into two integral children and stops there."""
-
-    # [id of node] -> the objective its master reports
-    _objectives: dict[int, float]
-    _integral_node_ids: set[int]
-
-    def __init__(
-        self, objectives: dict[int, float], integral_node_ids: set[int]
-    ) -> None:
-        self._objectives = objectives
-        self._integral_node_ids = integral_node_ids
+    """Splits a node into one child per scripted child objective."""
 
     def get_children(self, node: BranchNode) -> list[BranchNode]:
-        children: list[BranchNode] = []
-        for objective in CHILD_OBJECTIVES:
-            child = BranchNode(
+        return [
+            BranchNode(
                 branching_decisions=node.branching_decisions,
                 lower_bound=node.lower_bound,
                 master_relaxation_solution={},
             )
-            self._objectives[id(child)] = objective
-            self._integral_node_ids.add(id(child))
-            children.append(child)
-
-        return children
+            for _ in CHILD_OBJECTIVES
+        ]
 
 
 class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
@@ -229,34 +203,24 @@ RELAXATION_LOWER_BOUND_GENERATOR = RelaxationLowerBoundGenerator()
 NULL_INCUMBENT_GENERATOR = NullIncumbentGenerator()
 
 
-def build_root() -> BranchNode:
-    return ROOT_NODE
-
-
 def build_scripted_config(
-    monkeypatch: pytest.MonkeyPatch,
     time_limit_seconds: float = 1000.0,
     feasible: bool = True,
     root_is_integral: bool = False,
     node_lower_bound_generator: NodeLowerBoundGenerator = RELAXATION_LOWER_BOUND_GENERATOR,
     node_incumbent_generator: NodeIncumbentGenerator = NULL_INCUMBENT_GENERATOR,
 ) -> BranchAndPriceConfig:
-    monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
-
-    ROOT_NODE.lower_bound = -math.inf
-    ROOT_NODE.branching_decisions = ()
-    ROOT_NODE.master_relaxation_solution = {}
-
-    objectives = {id(ROOT_NODE): ROOT_OBJECTIVE}
-    integral_node_ids = {id(ROOT_NODE)} if root_is_integral else set()
+    root_master = FakeMasterProblem(ROOT_OBJECTIVE, feasible, root_is_integral)
+    child_masters = [
+        FakeMasterProblem(objective, feasible, integral=True)
+        for objective in CHILD_OBJECTIVES
+    ]
 
     return BranchAndPriceConfig(
         time_limit_seconds=time_limit_seconds,
         node_selector=BestFirstNodeSelector(),
-        branching_rule=FakeBranchingRule(objectives, integral_node_ids),
-        master_problem_builder=FakeMasterProblemBuilder(
-            objectives, integral_node_ids, feasible
-        ),
+        branching_rule=FakeBranchingRule(),
+        master_problem_builder=FakeMasterProblemBuilder([root_master, *child_masters]),
         pricing_problem_builder=NullPricingProblemBuilder(),
         column_generation=StandardColumnGeneration(),
         node_lower_bound_generator=node_lower_bound_generator,
@@ -266,7 +230,6 @@ def build_scripted_config(
 
 
 def solve_scripted_tree(
-    monkeypatch: pytest.MonkeyPatch,
     time_limit_seconds: float = 1000.0,
     feasible: bool = True,
     root_is_integral: bool = False,
@@ -274,7 +237,6 @@ def solve_scripted_tree(
     node_incumbent_generator: NodeIncumbentGenerator = NULL_INCUMBENT_GENERATOR,
 ) -> dict[str, Any]:
     config = build_scripted_config(
-        monkeypatch,
         time_limit_seconds,
         feasible,
         root_is_integral,
@@ -285,26 +247,20 @@ def solve_scripted_tree(
     return FakeBranchAndPriceSolver(config).solve(ProblemData()).meta_data
 
 
-def test_the_search_keeps_the_best_of_the_integral_children(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    meta_data = solve_scripted_tree(monkeypatch)
+def test_the_search_keeps_the_best_of_the_integral_children() -> None:
+    meta_data = solve_scripted_tree()
 
     assert meta_data["objective"] == 11.0
 
 
-def test_the_search_explores_the_root_and_both_children(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    meta_data = solve_scripted_tree(monkeypatch)
+def test_the_search_explores_the_root_and_both_children() -> None:
+    meta_data = solve_scripted_tree()
 
     assert meta_data["explored_node_count"] == 3
 
 
-def test_an_exhausted_tree_is_reported_as_optimal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    meta_data = solve_scripted_tree(monkeypatch)
+def test_an_exhausted_tree_is_reported_as_optimal() -> None:
+    meta_data = solve_scripted_tree()
 
     assert meta_data["status"] == "optimal"
     assert meta_data["best_bound"] == 11.0
@@ -316,27 +272,23 @@ def test_negative_objectives_are_not_clamped_to_zero(
     monkeypatch.setitem(globals(), "ROOT_OBJECTIVE", -10.0)
     monkeypatch.setitem(globals(), "CHILD_OBJECTIVES", (-9.0, -8.0))
 
-    meta_data = solve_scripted_tree(monkeypatch)
+    meta_data = solve_scripted_tree()
 
     assert meta_data["objective"] == -9.0
     assert meta_data["root_bound"] == -10.0
     assert meta_data["best_bound"] == -9.0
 
 
-def test_an_infeasible_root_is_reported_as_infeasible(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    meta_data = solve_scripted_tree(monkeypatch, feasible=False)
+def test_an_infeasible_root_is_reported_as_infeasible() -> None:
+    meta_data = solve_scripted_tree(feasible=False)
 
     assert meta_data["status"] == "infeasible"
     assert meta_data["objective"] == math.inf
     assert meta_data["root_bound"] == math.inf
 
 
-def test_a_timeout_without_an_incumbent_is_time_limited(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    meta_data = solve_scripted_tree(monkeypatch, time_limit_seconds=0.0)
+def test_a_timeout_without_an_incumbent_is_time_limited() -> None:
+    meta_data = solve_scripted_tree(time_limit_seconds=0.0)
 
     assert meta_data["status"] == "time-limit"
     assert meta_data["objective"] == math.inf
@@ -351,7 +303,7 @@ def test_a_timeout_with_an_incumbent_keeps_time_limit_status(
     clock = iter((0.0, 1.0, 2.0, 101.0, 102.0))
     monkeypatch.setattr(time, "perf_counter", lambda: next(clock))
 
-    meta_data = solve_scripted_tree(monkeypatch, time_limit_seconds=100.0)
+    meta_data = solve_scripted_tree(time_limit_seconds=100.0)
 
     assert meta_data["status"] == "time-limit"
     assert meta_data["objective"] == 12.0
@@ -364,7 +316,7 @@ def test_a_dominated_inherited_bound_is_pruned_before_solving(
 ) -> None:
     monkeypatch.setitem(globals(), "CHILD_OBJECTIVES", (10.0, 12.0))
 
-    meta_data = solve_scripted_tree(monkeypatch)
+    meta_data = solve_scripted_tree()
 
     assert meta_data["objective"] == 10.0
     assert meta_data["explored_node_count"] == 2
@@ -385,15 +337,13 @@ def test_integral_aggregates_preserve_fractional_columns_for_extraction(
     )
     monkeypatch.setattr(FakeBranchAndPriceSolver, "_extract_solution", extract_solution)
 
-    meta_data = solve_scripted_tree(monkeypatch, root_is_integral=True)
+    meta_data = solve_scripted_tree(root_is_integral=True)
 
     extract_solution.assert_called_once_with(master_relaxation_solution)
     assert meta_data["objective"] == 10.0
 
 
-def test_node_decisions_reach_both_builders_and_dispose_each_pricer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
     columns: list[Column] = [
         FakeColumn(cost=1.0, key=(1,)),
         FakeColumn(cost=2.0, key=(2,)),
@@ -425,12 +375,13 @@ def test_node_decisions_reach_both_builders_and_dispose_each_pricer(
     branching_rule = Mock(spec=BranchingRule)
     branching_rule.get_children.return_value = [left, right]
 
-    master_problem_builder = Mock(spec=MasterProblemBuilder)
-    master_problem_builder.build.side_effect = [
+    masters = [
         FakeMasterProblem(10.0),
         FakeMasterProblem(12.0, integral=True),
         FakeMasterProblem(11.0, feasible=False),
     ]
+    master_problem_builder = Mock(spec=MasterProblemBuilder)
+    master_problem_builder.build.side_effect = masters
     pricers = [Mock(spec=PricingProblem) for _ in range(3)]
     pricers[0].price.side_effect = [columns, []]
     pricers[1].price.return_value = []
@@ -451,30 +402,79 @@ def test_node_decisions_reach_both_builders_and_dispose_each_pricer(
             observers=[],
         )
     )
-    monkeypatch.setattr(BranchNodeFactory, "build_root", build_root)
 
     solver.solve(ProblemData())
 
     assert master_problem_builder.build.call_args_list == [
-        call(ROOT_NODE, []),
-        call(left, [columns[0]]),
-        call(right, columns[1:]),
+        call([]),
+        call([columns[0]]),
+        call(columns[1:]),
     ]
-    assert pricing_problem_builder.build.call_args_list == [
-        call(ROOT_NODE),
-        call(left),
-        call(right),
-    ]
+    assert pricing_problem_builder.build.call_args_list == [call(), call(), call()]
     assert len({id(pricing) for pricing in pricers}) == 3
     for pricing in pricers:
         pricing.dispose.assert_called_once_with()
+    left_decision.apply_to_master.assert_called_once_with(masters[1])
+    left_decision.apply_to_pricing.assert_called_once_with(pricers[1])
+    second_left_decision.apply_to_master.assert_called_once_with(masters[1])
+    second_left_decision.apply_to_pricing.assert_called_once_with(pricers[1])
+    right_decision.apply_to_master.assert_called_once_with(masters[2])
+    right_decision.apply_to_pricing.assert_called_once_with(pricers[2])
 
 
-def test_the_node_lower_bound_generator_sets_the_node_bound(
+def test_decisions_are_applied_to_both_models_before_column_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    master = Mock(spec=MasterProblem)
+    pricer = Mock(spec=PricingProblem)
+    master_problem_builder = Mock(spec=MasterProblemBuilder)
+    master_problem_builder.build.return_value = master
+    pricing_problem_builder = Mock(spec=PricingProblemBuilder)
+    pricing_problem_builder.build.return_value = pricer
+    column_generation = Mock(spec=ColumnGeneration)
+    column_generation.run.return_value = ColumnGenerationResult(
+        status=ColumnGenerationStatus.INFEASIBLE, bound=math.inf, round_count=1
+    )
+    first = Mock(spec=BranchingDecision)
+    second = Mock(spec=BranchingDecision)
+    manager = Mock()
+    manager.attach_mock(first, "first")
+    manager.attach_mock(second, "second")
+    manager.attach_mock(column_generation, "column_generation")
+    root = BranchNode(
+        branching_decisions=(first, second),
+        lower_bound=-math.inf,
+        master_relaxation_solution={},
+    )
+    monkeypatch.setattr(BranchNodeFactory, "build_root", lambda: root)
+    solver = FakeBranchAndPriceSolver(
+        BranchAndPriceConfig(
+            time_limit_seconds=1000.0,
+            node_selector=BestFirstNodeSelector(),
+            branching_rule=Mock(spec=BranchingRule),
+            master_problem_builder=master_problem_builder,
+            pricing_problem_builder=pricing_problem_builder,
+            column_generation=column_generation,
+            node_lower_bound_generator=RELAXATION_LOWER_BOUND_GENERATOR,
+            node_incumbent_generator=NULL_INCUMBENT_GENERATOR,
+            observers=[],
+        )
+    )
+
+    solver.solve(ProblemData())
+
+    assert manager.mock_calls == [
+        call.first.apply_to_master(master),
+        call.second.apply_to_master(master),
+        call.first.apply_to_pricing(pricer),
+        call.second.apply_to_pricing(pricer),
+        call.column_generation.run(master, pricer, ANY),
+    ]
+
+
+def test_the_node_lower_bound_generator_sets_the_node_bound() -> None:
     meta_data = solve_scripted_tree(
-        monkeypatch, node_lower_bound_generator=IncrementedLowerBoundGenerator()
+        node_lower_bound_generator=IncrementedLowerBoundGenerator()
     )
 
     assert meta_data["root_bound"] == ROOT_OBJECTIVE + 1.0
@@ -488,7 +488,7 @@ def test_a_heuristic_incumbent_closes_the_tree_and_is_extracted(
     monkeypatch.setattr(FakeBranchAndPriceSolver, "_extract_solution", extract_solution)
 
     meta_data = solve_scripted_tree(
-        monkeypatch, node_incumbent_generator=ScriptedIncumbentGenerator()
+        node_incumbent_generator=ScriptedIncumbentGenerator()
     )
 
     assert meta_data["status"] == "optimal"

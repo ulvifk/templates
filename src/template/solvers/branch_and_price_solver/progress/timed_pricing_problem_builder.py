@@ -1,6 +1,5 @@
 from time import perf_counter
 
-from template.solvers.branch_and_price_solver.branching.branch_node import BranchNode
 from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_problem import (
     PricingProblem,
 )
@@ -25,9 +24,9 @@ class TimedPricingProblemBuilder(PricingProblemBuilder):
         self._inner = inner
         self._observations = observations
 
-    def build(self, node: BranchNode) -> PricingProblem:
+    def build(self) -> PricingProblem:
         started_at = perf_counter()
-        pricing_problem = self._inner.build(node)
+        pricing_problem = self._inner.build()
         self._observations.seconds_by_component[NodeComponent.PRICING] = (
             perf_counter() - started_at
         )
