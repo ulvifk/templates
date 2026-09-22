@@ -49,8 +49,8 @@ idiomatic: plain dataclasses and tuples, no wrapper classes around them.
 ### `model/solution`
 
 The output side. `Solution` is a frozen dataclass holding the decisions a solver
-returns, and nothing else. `SolutionFactory.build_empty`, in the same file,
-returns a solution with every collection empty; solvers report that instead of
+returns, and nothing else. `SolutionFactory.build_empty`, in
+`solution_factory.py`, returns a solution with every collection empty; solvers report that instead of
 `None` when they found no incumbent, so no caller has to guard against `None`.
 
 ### `model/solve_result.py`
@@ -434,8 +434,8 @@ arc type on the arcs it emits from a given tail.
 
 ## Conventions that apply everywhere
 
-- Factories are a separate class in the same file as the class they create,
-  never static methods on that class.
+- Factories live in a separate `XxxFactory` class in its own file, never as static
+  methods on the class they create.
 - Containers of solver objects (variables, nodes, arcs) are explicit dicts,
   lists, or nested lists, indexed by ids, with a `[key] -> value` comment. They
   are private and reached only through named getters.

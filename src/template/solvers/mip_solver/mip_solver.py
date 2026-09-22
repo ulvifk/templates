@@ -3,7 +3,7 @@ from typing import Any
 from gurobipy import GRB
 
 from template.model.data.problem_data import ProblemData
-from template.model.solution.solution import SolutionFactory
+from template.model.solution.solution_factory import SolutionFactory
 from template.model.solve_result import SolveResult
 from template.solvers.mip_solver.mip_config import MIPConfig
 from template.solvers.mip_solver.mip_model import MIPModel
