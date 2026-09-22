@@ -404,7 +404,9 @@ so nothing that reads a finished network ever imports a builder.
   conservation reads both directions and should never rebuild them.
 - `constructor/discretization.py`: `ceil_to_step` and `floor_to_step`, the only
   two ways a continuous minute becomes a grid minute. Every rounding in the
-  project goes through them so the grid is consistent.
+  project goes through them so the grid is consistent. A minute within
+  `ZERO_TOLERANCE` steps of a grid minute snaps to it, so float noise never moves a
+  value onto the neighboring step.
 - `constructor/ts_column_builder.py` and `constructor/ts_network_builder.py`:
   the mutable side. `TSNetworkBuilder` allocates ids, creates a node once per
   location and time, and turns everything into a `TSNetwork` at the end.
