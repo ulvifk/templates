@@ -51,7 +51,6 @@ def test_children_inherit_decisions_and_bound_without_the_parent_solution() -> N
     column = Mock(spec=Column)
     root.lower_bound = 10.0
     root.master_relaxation_solution = {column: 0.5}
-    root.integral = True
     first = FakeBranchingDecision("first")
     second = FakeBranchingDecision("second")
     third = FakeBranchingDecision("third")
@@ -68,8 +67,6 @@ def test_children_inherit_decisions_and_bound_without_the_parent_solution() -> N
     assert sibling.master_relaxation_solution == {}
     assert grandchild.master_relaxation_solution == {}
     assert root.master_relaxation_solution == {column: 0.5}
-    assert not child.integral
-    assert not grandchild.integral
 
 
 def test_a_node_accepts_a_column_only_when_every_decision_accepts_it() -> None:

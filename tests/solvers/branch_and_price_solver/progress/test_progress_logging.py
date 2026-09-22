@@ -20,6 +20,7 @@ from template.solvers.branch_and_price_solver.column_generation.column_generatio
     ColumnGenerationStatus,
 )
 from template.solvers.branch_and_price_solver.explored_node import ExploredNode
+from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluation
 from template.solvers.branch_and_price_solver.node_outcome import NodeOutcome
 from template.solvers.branch_and_price_solver.progress.progress_logger import (
     ProgressLogger,
@@ -49,7 +50,6 @@ INFEASIBLE_NODE = ExploredNode(
         ),
         lower_bound=math.inf,
         master_relaxation_solution={},
-        integral=False,
     ),
     outcome=NodeOutcome.INFEASIBLE,
     compatible_column_count=142,
@@ -58,6 +58,14 @@ INFEASIBLE_NODE = ExploredNode(
         relaxation_objective=math.inf,
         round_count=4,
         new_column_count=7,
+    ),
+    evaluation=NodeEvaluation(
+        feasible=False,
+        relaxation_objective=math.inf,
+        lower_bound=math.inf,
+        relaxation_solution={},
+        integral=False,
+        incumbent=None,
     ),
     child_count=0,
     seconds_by_step={

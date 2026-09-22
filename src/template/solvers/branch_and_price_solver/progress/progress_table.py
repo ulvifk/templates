@@ -269,7 +269,7 @@ class ProgressTable:
 
     @staticmethod
     def _get_integrality_result(explored: ExploredNode) -> str:
-        if explored.node.integral:
+        if explored.evaluation.integral:
             return "integral"
 
         return "fractional"

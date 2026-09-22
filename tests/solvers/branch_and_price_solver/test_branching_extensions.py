@@ -30,9 +30,6 @@ from template.solvers.branch_and_price_solver.branching.node_selector.best_first
     BestFirstNodeSelector,
 )
 from template.solvers.branch_and_price_solver.column_generation.column import Column
-from template.solvers.branch_and_price_solver.column_generation.column_generation_result import (
-    ColumnGenerationResult,
-)
 from template.solvers.branch_and_price_solver.column_generation.master.duals import (
     Duals,
 )
@@ -58,6 +55,7 @@ from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbe
 from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
     NodeIncumbentGenerator,
 )
+from template.solvers.branch_and_price_solver.node_context import NodeContext
 from template.solvers.branch_and_price_solver.progress.progress_logger import (
     ProgressLogger,
 )
@@ -277,14 +275,12 @@ class NoBranchingRule(BranchingRule):
 
 
 class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
-    def generate(
-        self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
-    ) -> float:
-        return result.relaxation_objective
+    def generate(self, context: NodeContext) -> float:
+        return context.column_generation_result.relaxation_objective
 
 
 class NoIncumbentGenerator(NodeIncumbentGenerator):
-    def generate(self, node: BranchNode, master: MasterProblem) -> Incumbent | None:
+    def generate(self, context: NodeContext) -> Incumbent | None:
         return None
 
 
@@ -352,7 +348,6 @@ def test_branching_decisions_drive_initial_and_priced_columns_to_convergence(
         ),
         lower_bound=-math.inf,
         master_relaxation_solution={},
-        integral=False,
     )
     monkeypatch.setattr(BranchNodeFactory, "build_root", lambda: root)
 

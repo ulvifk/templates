@@ -139,7 +139,11 @@ generation, the node lower bound generator, and the node incumbent generator are
 supplied through `BranchAndPriceConfig`; the solver keeps `_extract_solution` as its
 one abstract method. The lower bound generator turns a converged node into the bound
 the node is pruned and reported with, and the incumbent generator is the primal
-heuristic run on a fractional node; both see the node's master before it is disposed.
+heuristic run on a fractional node. Both receive one `NodeContext`: the node, its live
+master, the column generation result, and the incumbent objective so far. A generator
+that needs more search state gets a new `NodeContext` field, and existing generators
+stay unchanged; project data such as `ProblemData` goes into the generator's
+constructor instead.
 A project typically plugs in the relaxation bound, or its ceiling when every objective
 coefficient is integer, and either an integer restricted master heuristic or nothing.
 
@@ -148,7 +152,7 @@ decisions in `branching_decisions: tuple[BranchingDecision, ...]`.
 The root starts with an empty tuple. `BranchingRule.get_children(node)` creates
 the children. Its `_build_child(node, decision)` helper appends the new
 decision to the inherited ones, retains the parent's lower bound, and clears
-the relaxation solution and its integrality.
+the relaxation solution.
 
 Each project's `BranchingDecision` subclasses carry the branch choice and enforce it
 themselves; the builders, the master, the pricer, the column generation, and `Duals`
@@ -219,10 +223,15 @@ establish convergence. After convergence, the master reports whether the node is
 feasible. The template does
 not prescribe how the master establishes or restores feasibility.
 
-The master's `is_integral`, asked after convergence, decides whether the node
-supplies the incumbent itself; a fractional node can still supply one through the
-incumbent generator, which is only asked there, and a heuristic incumbent that
-reaches the node's bound closes the node before it branches. Extraction runs once
+A node is handled in two phases. `_evaluate_node` reads everything the node offers
+from its master into a `NodeEvaluation` and changes nothing; the master is then
+disposed, and `_settle_node` takes an improving incumbent and decides the outcome from
+that data alone, so it is tested without models. The master's `is_integral`, asked
+after convergence, decides whether the node supplies the incumbent itself, judged by
+its relaxation objective rather than the generator's bound; a fractional node can
+still supply one through the incumbent generator, which is only asked there, and a
+heuristic incumbent that reaches the node's bound closes the node before it branches.
+Extraction runs once
 when the search ends, on the incumbent's column values. An exhausted tree
 is optimal with an incumbent and infeasible without one. The deadline is checked between nodes, so
 the time limit can overrun by one node.
@@ -273,11 +282,13 @@ bound shows `inf`, and a missing incumbent shows `-`.
   applies the node's decisions to its models, and the solution extraction hook.
 - `explored_node.py` and `node_outcome.py`: what one node did, where its time went,
   and how it ended.
+- `node_context.py`: what the node generators see about a converged node.
+- `node_evaluation.py`: everything read from a node's master before it is disposed.
 - `search_summary.py`: how the search ended.
 - `branch_and_price_observer.py`: the per-node and end-of-search hooks the solver
   reports to.
 - `branching/branch_node.py`: branching decisions, relaxation bound,
-  `master_relaxation_solution` and its integrality, and the root factory.
+  `master_relaxation_solution`, and the root factory.
 - `branching/branching_decision.py`: the branch choice that filters columns and
   enforces itself on the master and the pricer.
 - `branching/branching_rule/branching_rule.py`: the branching hook and child construction.

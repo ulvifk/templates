@@ -4,6 +4,7 @@ from template.solvers.branch_and_price_solver.branching.branch_node import Branc
 from template.solvers.branch_and_price_solver.column_generation.column_generation_result import (
     ColumnGenerationResult,
 )
+from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluation
 from template.solvers.branch_and_price_solver.node_outcome import NodeOutcome
 from template.solvers.branch_and_price_solver.timing.node_step import NodeStep
 
@@ -18,6 +19,7 @@ class ExploredNode:
 
     compatible_column_count: int
     column_generation_result: ColumnGenerationResult
+    evaluation: NodeEvaluation
     child_count: int  # 0 when the node did not branch
 
     # [step] -> its seconds; a step the node never reached is absent

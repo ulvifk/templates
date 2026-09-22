@@ -23,9 +23,6 @@ class BranchNode:
     lower_bound: float
     # [column] -> value in the node's relaxation; empty until the node is solved
     master_relaxation_solution: dict[Column, float]
-    integral: (
-        bool  # whether the master found the relaxation integral; False until solved
-    )
 
     def is_column_compatible(self, column: Column) -> bool:
         return all(
@@ -49,5 +46,4 @@ class BranchNodeFactory:
             branching_decisions=(),
             lower_bound=-math.inf,
             master_relaxation_solution={},
-            integral=False,
         )

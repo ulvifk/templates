@@ -66,6 +66,9 @@ from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbe
 from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
     NodeIncumbentGenerator,
 )
+from template.solvers.branch_and_price_solver.node_context import NodeContext
+from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluation
+from template.solvers.branch_and_price_solver.node_outcome import NodeOutcome
 from template.solvers.branch_and_price_solver.timing.clock import Clock
 
 ROOT_OBJECTIVE = 10.0
@@ -192,7 +195,6 @@ class FakeBranchingRule(BranchingRule):
                 branching_decisions=node.branching_decisions,
                 lower_bound=node.lower_bound,
                 master_relaxation_solution={},
-                integral=False,
             )
             for _ in CHILD_OBJECTIVES
         ]
@@ -201,32 +203,28 @@ class FakeBranchingRule(BranchingRule):
 class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
     """Reports the relaxation bound unchanged."""
 
-    def generate(
-        self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
-    ) -> float:
-        return result.relaxation_objective
+    def generate(self, context: NodeContext) -> float:
+        return context.column_generation_result.relaxation_objective
 
 
 class IncrementedLowerBoundGenerator(NodeLowerBoundGenerator):
     """Reports a bound one unit above the relaxation."""
 
-    def generate(
-        self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
-    ) -> float:
-        return result.relaxation_objective + 1.0
+    def generate(self, context: NodeContext) -> float:
+        return context.column_generation_result.relaxation_objective + 1.0
 
 
 class NullIncumbentGenerator(NodeIncumbentGenerator):
     """Finds nothing on any node."""
 
-    def generate(self, node: BranchNode, master: MasterProblem) -> Incumbent | None:
+    def generate(self, context: NodeContext) -> Incumbent | None:
         return None
 
 
 class ScriptedIncumbentGenerator(NodeIncumbentGenerator):
     """Finds the same scripted incumbent on every fractional node."""
 
-    def generate(self, node: BranchNode, master: MasterProblem) -> Incumbent | None:
+    def generate(self, context: NodeContext) -> Incumbent | None:
         return Incumbent(HEURISTIC_OBJECTIVE, HEURISTIC_COLUMN_VALUES)
 
 
@@ -400,13 +398,11 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
         branching_decisions=(left_decision, second_left_decision),
         lower_bound=-math.inf,
         master_relaxation_solution={},
-        integral=False,
     )
     right = BranchNode(
         branching_decisions=(right_decision,),
         lower_bound=-math.inf,
         master_relaxation_solution={},
-        integral=False,
     )
     branching_rule = Mock(spec=BranchingRule)
     branching_rule.get_children.return_value = [left, right]
@@ -485,7 +481,6 @@ def test_decisions_are_applied_to_both_models_before_column_generation(
         branching_decisions=(first, second),
         lower_bound=-math.inf,
         master_relaxation_solution={},
-        integral=False,
     )
     monkeypatch.setattr(BranchNodeFactory, "build_root", lambda: root)
     solver = FakeBranchAndPriceSolver(
@@ -546,3 +541,54 @@ def test_a_heuristic_incumbent_closes_the_tree_and_is_extracted(
     assert meta_data["status"] == "optimal"
     assert meta_data["objective"] == HEURISTIC_OBJECTIVE
     extract_solution.assert_called_once_with(HEURISTIC_COLUMN_VALUES)
+
+
+def build_evaluation(
+    integral: bool = False,
+    lower_bound: float = 8.0,
+    incumbent_objective: float | None = None,
+) -> NodeEvaluation:
+    incumbent = None
+    if incumbent_objective is not None:
+        incumbent = Incumbent(incumbent_objective, HEURISTIC_COLUMN_VALUES)
+
+    return NodeEvaluation(
+        feasible=True,
+        relaxation_objective=lower_bound,
+        lower_bound=lower_bound,
+        relaxation_solution={},
+        integral=integral,
+        incumbent=incumbent,
+    )
+
+
+INFEASIBLE_EVALUATION = NodeEvaluation(
+    feasible=False,
+    relaxation_objective=math.inf,
+    lower_bound=math.inf,
+    relaxation_solution={},
+    integral=False,
+    incumbent=None,
+)
+
+
+@pytest.mark.parametrize(
+    ("evaluation", "outcome", "incumbent_objective"),
+    [
+        (INFEASIBLE_EVALUATION, NodeOutcome.INFEASIBLE, 10.0),
+        (build_evaluation(True, 9.0, 9.0), NodeOutcome.INTEGRAL, 9.0),
+        (build_evaluation(True, 11.0, 11.0), NodeOutcome.PRUNED, 10.0),
+        (build_evaluation(lower_bound=11.0), NodeOutcome.PRUNED, 10.0),
+        (build_evaluation(incumbent_objective=8.0), NodeOutcome.HEURISTIC, 8.0),
+        (build_evaluation(incumbent_objective=9.0), NodeOutcome.BRANCHED, 9.0),
+        (build_evaluation(), NodeOutcome.BRANCHED, 10.0),
+    ],
+)
+def test_settling_a_node_takes_an_improving_incumbent_and_decides_its_outcome(
+    evaluation: NodeEvaluation, outcome: NodeOutcome, incumbent_objective: float
+) -> None:
+    solver = FakeBranchAndPriceSolver(build_scripted_config())
+    solver._incumbent = Incumbent(10.0, {})
+
+    assert solver._settle_node(evaluation) is outcome
+    assert solver._get_incumbent_objective() == incumbent_objective
