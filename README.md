@@ -434,8 +434,10 @@ arc type on the arcs it emits from a given tail.
 
 ## Conventions that apply everywhere
 
-- Factories live in a separate `XxxFactory` class in its own file, never as static
-  methods on the class they create.
+- Factories live in a separate `XxxFactory` class in its own file, in the same
+  package as the class they create; never as static methods on that class or as a
+  second class in its file, so the class stays about what it is and its file stays
+  short.
 - Containers of solver objects (variables, nodes, arcs) are explicit dicts,
   lists, or nested lists, indexed by ids, with a `[key] -> value` comment. They
   are private and reached only through named getters.
