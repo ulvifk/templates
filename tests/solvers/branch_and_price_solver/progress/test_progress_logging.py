@@ -55,7 +55,7 @@ INFEASIBLE_NODE = ExploredNode(
     compatible_column_count=142,
     column_generation_result=ColumnGenerationResult(
         status=ColumnGenerationStatus.INFEASIBLE,
-        bound=math.inf,
+        relaxation_objective=math.inf,
         round_count=4,
         new_column_count=7,
     ),

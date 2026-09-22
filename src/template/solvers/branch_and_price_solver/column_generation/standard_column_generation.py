@@ -55,14 +55,14 @@ class StandardColumnGeneration(ColumnGeneration):
         if not master.is_feasible():
             return ColumnGenerationResult(
                 status=ColumnGenerationStatus.INFEASIBLE,
-                bound=math.inf,
+                relaxation_objective=math.inf,
                 round_count=round_count,
                 new_column_count=new_column_count,
             )
 
         return ColumnGenerationResult(
             status=ColumnGenerationStatus.CONVERGED,
-            bound=objective,
+            relaxation_objective=objective,
             round_count=round_count,
             new_column_count=new_column_count,
         )

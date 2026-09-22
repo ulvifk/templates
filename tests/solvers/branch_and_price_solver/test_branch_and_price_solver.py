@@ -204,7 +204,7 @@ class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
     def generate(
         self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
     ) -> float:
-        return result.bound
+        return result.relaxation_objective
 
 
 class IncrementedLowerBoundGenerator(NodeLowerBoundGenerator):
@@ -213,7 +213,7 @@ class IncrementedLowerBoundGenerator(NodeLowerBoundGenerator):
     def generate(
         self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
     ) -> float:
-        return result.bound + 1.0
+        return result.relaxation_objective + 1.0
 
 
 class NullIncumbentGenerator(NodeIncumbentGenerator):
@@ -471,7 +471,7 @@ def test_decisions_are_applied_to_both_models_before_column_generation(
     column_generation = Mock(spec=ColumnGeneration)
     column_generation.run.return_value = ColumnGenerationResult(
         status=ColumnGenerationStatus.INFEASIBLE,
-        bound=math.inf,
+        relaxation_objective=math.inf,
         round_count=1,
         new_column_count=0,
     )
@@ -520,7 +520,17 @@ def test_the_node_lower_bound_generator_sets_the_node_bound() -> None:
     )
 
     assert meta_data["root_bound"] == ROOT_OBJECTIVE + 1.0
-    assert meta_data["objective"] == min(CHILD_OBJECTIVES) + 1.0
+
+
+def test_an_integral_node_is_judged_by_its_objective_not_by_its_bound() -> None:
+    # the second child's bound, 12, reaches the first child's incumbent, 12, yet its
+    # own objective, 11, improves it
+    meta_data = solve_scripted_tree(
+        node_lower_bound_generator=IncrementedLowerBoundGenerator()
+    )
+
+    assert meta_data["objective"] == min(CHILD_OBJECTIVES)
+    assert meta_data["explored_node_count"] == 3
 
 
 def test_a_heuristic_incumbent_closes_the_tree_and_is_extracted(

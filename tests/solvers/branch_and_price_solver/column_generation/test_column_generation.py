@@ -107,7 +107,7 @@ def test_column_generation_converges_after_pricing_returns_no_columns() -> None:
     result = StandardColumnGeneration().run(master, pricer, ColumnPool(), step_timer)
 
     assert result.status is ColumnGenerationStatus.CONVERGED
-    assert result.bound == 101.0
+    assert result.relaxation_objective == 101.0
     assert result.round_count == 2
     assert result.new_column_count == 1
     assert master.added_columns == [column]
@@ -126,7 +126,7 @@ def test_pricing_convergence_with_an_infeasible_master_is_infeasible() -> None:
     )
 
     assert result.status is ColumnGenerationStatus.INFEASIBLE
-    assert result.bound == math.inf
+    assert result.relaxation_objective == math.inf
     assert result.round_count == 1
 
 

@@ -295,7 +295,7 @@ bound shows `inf`, and a missing incumbent shows `-`.
 - `column_generation/column_generation.py`: the solve-price-add interface.
 - `column_generation/standard_column_generation.py`: the shipped solve-price-add loop.
 - `column_generation/column_generation_status.py` and `column_generation_result.py`:
-  convergence status, bound, round count, and new column count.
+  convergence status, relaxation objective, round count, and new column count.
 - `bounding/`: the node lower bound interface.
 - `incumbent/`: `Incumbent` is an objective with the column values behind it, and the
   generator interface.

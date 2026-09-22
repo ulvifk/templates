@@ -141,7 +141,7 @@ class BranchAndPriceSolver(Solver, ABC):
         step_timer: StepTimer,
     ) -> NodeOutcome:
         if column_generation_result.status is ColumnGenerationStatus.INFEASIBLE:
-            node.lower_bound = column_generation_result.bound
+            node.lower_bound = column_generation_result.relaxation_objective
             self._record_root_bound(node.lower_bound)
             master.dispose()
 
@@ -165,15 +165,20 @@ class BranchAndPriceSolver(Solver, ABC):
             step_timer.finish_step(NodeStep.INCUMBENT)
         master.dispose()
 
-        if self._is_closed_by_incumbent(node.lower_bound):
-            return NodeOutcome.PRUNED
-
+        # an integral node is judged by its own objective, not by the generator's bound
         if node.integral:
+            relaxation_objective = column_generation_result.relaxation_objective
+            if not self._is_better_than_incumbent(relaxation_objective):
+                return NodeOutcome.PRUNED
+
             self._incumbent = Incumbent(
-                node.lower_bound, node.master_relaxation_solution
+                relaxation_objective, node.master_relaxation_solution
             )
 
             return NodeOutcome.INTEGRAL
+
+        if self._is_closed_by_incumbent(node.lower_bound):
+            return NodeOutcome.PRUNED
 
         if self._improves_incumbent(heuristic_incumbent):
             self._incumbent = heuristic_incumbent

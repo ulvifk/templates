@@ -280,7 +280,7 @@ class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
     def generate(
         self, node: BranchNode, master: MasterProblem, result: ColumnGenerationResult
     ) -> float:
-        return result.bound
+        return result.relaxation_objective
 
 
 class NoIncumbentGenerator(NodeIncumbentGenerator):
