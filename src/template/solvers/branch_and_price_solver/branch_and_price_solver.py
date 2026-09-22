@@ -1,10 +1,8 @@
 import math
-from abc import ABC, abstractmethod
 from typing import Any
 
 from template.constants import ZERO_TOLERANCE
 from template.model.data.problem_data import ProblemData
-from template.model.solution.solution import Solution
 from template.model.solve_result import SolveResult
 from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
@@ -34,7 +32,7 @@ from template.solvers.branch_and_price_solver.timing.step_timer import StepTimer
 from template.solvers.solver import Solver
 
 
-class BranchAndPriceSolver(Solver, ABC):
+class BranchAndPriceSolver(Solver):
     SOLVER_NAME = "branch-and-price"
 
     _config: BranchAndPriceConfig
@@ -65,7 +63,9 @@ class BranchAndPriceSolver(Solver, ABC):
             explored = self._explore_node(node)
             self._notify_node_explored(explored)
 
-        solution = self._extract_solution(self._get_incumbent_column_values())
+        solution = self._config.solution_extractor.extract(
+            self._get_incumbent_column_values()
+        )
         summary = self._build_search_summary()
         self._notify_search_finished(summary)
 
@@ -294,8 +294,3 @@ class BranchAndPriceSolver(Solver, ABC):
             return "optimal"
 
         return "time-limit"
-
-    # build the solution from the incumbent's column values, preserving its objective;
-    # an empty mapping means no incumbent and yields the empty solution
-    @abstractmethod
-    def _extract_solution(self, column_values: dict[Column, float]) -> Solution: ...

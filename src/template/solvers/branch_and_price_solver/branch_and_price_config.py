@@ -24,6 +24,9 @@ from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_
 from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
     NodeIncumbentGenerator,
 )
+from template.solvers.branch_and_price_solver.solution_extractor import (
+    SolutionExtractor,
+)
 from template.solvers.branch_and_price_solver.timing.clock import Clock
 
 
@@ -39,5 +42,6 @@ class BranchAndPriceConfig:
     column_generation: ColumnGeneration
     node_lower_bound_generator: NodeLowerBoundGenerator
     node_incumbent_generator: NodeIncumbentGenerator
+    solution_extractor: SolutionExtractor
 
     observers: list[BranchAndPriceObserver]

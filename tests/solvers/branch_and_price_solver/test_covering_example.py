@@ -56,6 +56,9 @@ from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluat
 from template.solvers.branch_and_price_solver.progress.progress_logger import (
     ProgressLogger,
 )
+from template.solvers.branch_and_price_solver.solution_extractor import (
+    SolutionExtractor,
+)
 from template.solvers.branch_and_price_solver.timing.system_clock import SystemClock
 
 
@@ -277,8 +280,8 @@ class NoIncumbentGenerator(NodeIncumbentGenerator):
         return None
 
 
-class CoveringBranchAndPriceSolver(BranchAndPriceSolver):
-    def _extract_solution(self, column_values: dict[Column, float]) -> Solution:
+class EmptySolutionExtractor(SolutionExtractor):
+    def extract(self, column_values: dict[Column, float]) -> Solution:
         return Solution()
 
 
@@ -296,6 +299,7 @@ def build_covering_config(
         column_generation=StandardColumnGeneration(),
         node_lower_bound_generator=RelaxationLowerBoundGenerator(),
         node_incumbent_generator=NoIncumbentGenerator(),
+        solution_extractor=EmptySolutionExtractor(),
         observers=[],
     )
 
@@ -323,7 +327,7 @@ def test_covering_rows_drive_initial_and_priced_columns_to_convergence(
     if logging_enabled:
         config = replace(config, observers=[ProgressLogger()])
 
-    result = CoveringBranchAndPriceSolver(config).solve(ProblemData())
+    result = BranchAndPriceSolver(config).solve(ProblemData())
 
     assert result.meta_data["status"] == "optimal"
     assert result.meta_data["objective"] == pytest.approx(5.0)

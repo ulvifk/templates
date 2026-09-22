@@ -9,6 +9,9 @@ from template.model.data.problem_data import ProblemData
 from template.solvers.branch_and_price_solver.branch_and_price_observer import (
     BranchAndPriceObserver,
 )
+from template.solvers.branch_and_price_solver.branch_and_price_solver import (
+    BranchAndPriceSolver,
+)
 from template.solvers.branch_and_price_solver.branching.branch_node import BranchNode
 from template.solvers.branch_and_price_solver.branching.branching_decision import (
     BranchingDecision,
@@ -35,7 +38,6 @@ from tests.solvers.branch_and_price_solver import (
     test_branch_and_price_solver as solver_tests,
 )
 from tests.solvers.branch_and_price_solver.test_branch_and_price_solver import (
-    FakeBranchAndPriceSolver,
     FakeClock,
     NodeDurationObserver,
     build_scripted_config,
@@ -118,7 +120,7 @@ def test_the_logging_writes_one_row_per_node_under_a_single_header(
     caplog.set_level(logging.INFO)
     config = replace(build_scripted_config(), observers=[ProgressLogger()])
 
-    FakeBranchAndPriceSolver(config).solve(ProblemData())
+    BranchAndPriceSolver(config).solve(ProblemData())
 
     messages = [record.getMessage() for record in caplog.records]
     header_lines = ProgressTable.format_header().splitlines()
@@ -132,7 +134,7 @@ def test_every_explored_node_and_the_summary_reach_the_observer() -> None:
     observer = RecordingObserver()
     config = replace(build_scripted_config(), observers=[observer])
 
-    result = FakeBranchAndPriceSolver(config).solve(ProblemData())
+    result = BranchAndPriceSolver(config).solve(ProblemData())
 
     assert [explored.node_id for explored in observer.explored_nodes] == [1, 2, 3]
     assert [explored.outcome for explored in observer.explored_nodes] == [
@@ -155,7 +157,7 @@ def test_explored_nodes_report_the_elapsed_time_since_the_search_started() -> No
         observers=[observer, NodeDurationObserver(clock, node_seconds=60.0)],
     )
 
-    FakeBranchAndPriceSolver(config).solve(ProblemData())
+    BranchAndPriceSolver(config).solve(ProblemData())
 
     assert [explored.elapsed_seconds for explored in observer.explored_nodes] == [
         0.0,
@@ -191,7 +193,7 @@ def test_zero_objective_logging_does_not_crash_when_info_is_disabled(
     caplog.set_level(logging.WARNING)
     config = replace(build_scripted_config(), observers=[ProgressLogger()])
 
-    result = FakeBranchAndPriceSolver(config).solve(ProblemData())
+    result = BranchAndPriceSolver(config).solve(ProblemData())
 
     assert result.meta_data["objective"] == 0.0
 
@@ -208,12 +210,12 @@ def test_one_progress_logger_restarts_the_header_and_ids_for_each_search(
     progress_logger = ProgressLogger()
 
     first_config = replace(build_scripted_config(), observers=[progress_logger])
-    FakeBranchAndPriceSolver(first_config).solve(ProblemData())
+    BranchAndPriceSolver(first_config).solve(ProblemData())
     first_messages = [record.getMessage() for record in caplog.records]
 
     caplog.clear()
     second_config = replace(build_scripted_config(), observers=[progress_logger])
-    FakeBranchAndPriceSolver(second_config).solve(ProblemData())
+    BranchAndPriceSolver(second_config).solve(ProblemData())
     second_messages = [record.getMessage() for record in caplog.records]
 
     header_lines = ProgressTable.format_header().splitlines()
@@ -232,7 +234,7 @@ def test_progress_table_reports_integrality_for_a_pruned_integral_node(
     observer = RecordingObserver()
     config = replace(build_scripted_config(), observers=[observer, ProgressLogger()])
 
-    FakeBranchAndPriceSolver(config).solve(ProblemData())
+    BranchAndPriceSolver(config).solve(ProblemData())
 
     assert [explored.outcome for explored in observer.explored_nodes] == [
         NodeOutcome.BRANCHED,

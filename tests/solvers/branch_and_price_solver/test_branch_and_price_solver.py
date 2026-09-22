@@ -66,6 +66,9 @@ from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator
 from template.solvers.branch_and_price_solver.node_context import NodeContext
 from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluation
 from template.solvers.branch_and_price_solver.node_outcome import NodeOutcome
+from template.solvers.branch_and_price_solver.solution_extractor import (
+    SolutionExtractor,
+)
 from template.solvers.branch_and_price_solver.timing.clock import Clock
 
 ROOT_OBJECTIVE = 10.0
@@ -178,8 +181,8 @@ class NullPricingProblemBuilder(PricingProblemBuilder):
         return NullPricingProblem()
 
 
-class FakeBranchAndPriceSolver(BranchAndPriceSolver):
-    def _extract_solution(self, column_values: dict[Column, float]) -> Solution:
+class EmptySolutionExtractor(SolutionExtractor):
+    def extract(self, column_values: dict[Column, float]) -> Solution:
         return Solution()
 
 
@@ -253,6 +256,7 @@ def build_scripted_config(
         column_generation=StandardColumnGeneration(),
         node_lower_bound_generator=node_lower_bound_generator,
         node_incumbent_generator=node_incumbent_generator,
+        solution_extractor=EmptySolutionExtractor(),
         observers=[],
     )
 
@@ -272,7 +276,7 @@ def solve_scripted_tree(
         node_incumbent_generator,
     )
 
-    return FakeBranchAndPriceSolver(config).solve(ProblemData()).meta_data
+    return BranchAndPriceSolver(config).solve(ProblemData()).meta_data
 
 
 def test_the_search_keeps_the_best_of_the_integral_children() -> None:
@@ -333,7 +337,7 @@ def test_a_timeout_with_an_incumbent_keeps_time_limit_status() -> None:
         observers=[NodeDurationObserver(clock, node_seconds=60.0)],
     )
 
-    meta_data = FakeBranchAndPriceSolver(config).solve(ProblemData()).meta_data
+    meta_data = BranchAndPriceSolver(config).solve(ProblemData()).meta_data
 
     assert meta_data["status"] == "time-limit"
     assert meta_data["objective"] == 12.0
@@ -359,17 +363,21 @@ def test_integral_aggregates_preserve_fractional_columns_for_extraction(
         FakeColumn(cost=10.0, key=(1,)): 0.5,
         FakeColumn(cost=10.0, key=(2,)): 0.5,
     }
-    extract_solution = Mock(return_value=Solution())
     monkeypatch.setattr(
         FakeMasterProblem,
         "get_master_relaxation_solution",
         lambda self: master_relaxation_solution,
     )
-    monkeypatch.setattr(FakeBranchAndPriceSolver, "_extract_solution", extract_solution)
+    solution_extractor = Mock(spec=SolutionExtractor)
+    solution_extractor.extract.return_value = Solution()
+    config = replace(
+        build_scripted_config(root_is_integral=True),
+        solution_extractor=solution_extractor,
+    )
 
-    meta_data = solve_scripted_tree(root_is_integral=True)
+    meta_data = BranchAndPriceSolver(config).solve(ProblemData()).meta_data
 
-    extract_solution.assert_called_once_with(master_relaxation_solution)
+    solution_extractor.extract.assert_called_once_with(master_relaxation_solution)
     assert meta_data["objective"] == 10.0
 
 
@@ -417,7 +425,7 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
     pricing_problem_builder = Mock(spec=PricingProblemBuilder)
     pricing_problem_builder.build.side_effect = pricers
 
-    solver = FakeBranchAndPriceSolver(
+    solver = BranchAndPriceSolver(
         BranchAndPriceConfig(
             time_limit_seconds=1000.0,
             clock=FakeClock(),
@@ -428,6 +436,7 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
             column_generation=StandardColumnGeneration(),
             node_lower_bound_generator=RELAXATION_LOWER_BOUND_GENERATOR,
             node_incumbent_generator=NULL_INCUMBENT_GENERATOR,
+            solution_extractor=EmptySolutionExtractor(),
             observers=[],
         )
     )
@@ -484,7 +493,7 @@ def test_decisions_are_applied_to_both_models_before_column_generation() -> None
     child = BranchNode(branching_decisions=(first, second), lower_bound=10.0)
     branching_rule = Mock(spec=BranchingRule)
     branching_rule.get_children.return_value = [child]
-    solver = FakeBranchAndPriceSolver(
+    solver = BranchAndPriceSolver(
         BranchAndPriceConfig(
             time_limit_seconds=1000.0,
             clock=FakeClock(),
@@ -495,6 +504,7 @@ def test_decisions_are_applied_to_both_models_before_column_generation() -> None
             column_generation=column_generation,
             node_lower_bound_generator=RELAXATION_LOWER_BOUND_GENERATOR,
             node_incumbent_generator=NULL_INCUMBENT_GENERATOR,
+            solution_extractor=EmptySolutionExtractor(),
             observers=[],
         )
     )
@@ -516,7 +526,7 @@ def test_the_branching_rule_reads_the_relaxation_from_the_evaluation() -> None:
     branching_rule.get_children.return_value = []
     config = replace(build_scripted_config(), branching_rule=branching_rule)
 
-    FakeBranchAndPriceSolver(config).solve(ProblemData())
+    BranchAndPriceSolver(config).solve(ProblemData())
 
     ((root, evaluation),) = [
         called.args for called in branching_rule.get_children.call_args_list
@@ -546,19 +556,19 @@ def test_an_integral_node_is_judged_by_its_objective_not_by_its_bound() -> None:
     assert meta_data["explored_node_count"] == 3
 
 
-def test_a_heuristic_incumbent_closes_the_tree_and_is_extracted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    extract_solution = Mock(return_value=Solution())
-    monkeypatch.setattr(FakeBranchAndPriceSolver, "_extract_solution", extract_solution)
-
-    meta_data = solve_scripted_tree(
-        node_incumbent_generator=ScriptedIncumbentGenerator()
+def test_a_heuristic_incumbent_closes_the_tree_and_is_extracted() -> None:
+    solution_extractor = Mock(spec=SolutionExtractor)
+    solution_extractor.extract.return_value = Solution()
+    config = replace(
+        build_scripted_config(node_incumbent_generator=ScriptedIncumbentGenerator()),
+        solution_extractor=solution_extractor,
     )
+
+    meta_data = BranchAndPriceSolver(config).solve(ProblemData()).meta_data
 
     assert meta_data["status"] == "optimal"
     assert meta_data["objective"] == HEURISTIC_OBJECTIVE
-    extract_solution.assert_called_once_with(HEURISTIC_COLUMN_VALUES)
+    solution_extractor.extract.assert_called_once_with(HEURISTIC_COLUMN_VALUES)
 
 
 def build_evaluation(
@@ -605,7 +615,7 @@ INFEASIBLE_EVALUATION = NodeEvaluation(
 def test_settling_a_node_takes_an_improving_incumbent_and_decides_its_outcome(
     evaluation: NodeEvaluation, outcome: NodeOutcome, incumbent_objective: float
 ) -> None:
-    solver = FakeBranchAndPriceSolver(build_scripted_config())
+    solver = BranchAndPriceSolver(build_scripted_config())
     solver._incumbent = Incumbent(10.0, {})
 
     assert solver._settle_node(evaluation) is outcome

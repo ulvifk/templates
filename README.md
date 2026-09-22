@@ -135,9 +135,10 @@ The objective is minimized. The template provides the search and pricing loops;
 each project supplies its formulation, initialization, feasibility handling,
 branching decisions, integrality checks, and solution extraction. The node
 selector, the branching rule, the master builder, the pricing builder, the column
-generation, the node lower bound generator, and the node incumbent generator are all
-supplied through `BranchAndPriceConfig`; the solver keeps `_extract_solution` as its
-one abstract method. The lower bound generator turns a converged node into the bound
+generation, the node lower bound generator, the node incumbent generator, and the
+solution extractor are all supplied through `BranchAndPriceConfig`, so the solver is
+concrete: a project builds `BranchAndPriceSolver(config)` and never subclasses it.
+The lower bound generator turns a converged node into the bound
 the node is pruned and reported with, and the incumbent generator is the primal
 heuristic run on a fractional node. Both receive one `NodeContext`: the node, its live
 master, the column generation result, and the incumbent objective so far. A generator
@@ -280,9 +281,12 @@ bound shows `inf`, and a missing incumbent shows `-`.
 
 - `branch_and_price_config.py`: the search time limit and clock, the node selector,
   the branching rule, the master and pricing builders, the column generation, the
-  node lower bound and incumbent generators, and the observers.
-- `branch_and_price_solver.py`: the tree loop, the per-node exploration, which
-  applies the node's decisions to its models, and the solution extraction hook.
+  node lower bound and incumbent generators, the solution extractor, and the
+  observers.
+- `branch_and_price_solver.py`: the tree loop and the per-node exploration, which
+  applies the node's decisions to its models.
+- `solution_extractor.py`: turns the incumbent's column values into a `Solution`; an
+  empty mapping means no incumbent and yields the empty solution.
 - `explored_node.py` and `node_outcome.py`: what one node did, where its time went,
   and how it ended.
 - `node_context.py`: what the node generators see about a converged node.
