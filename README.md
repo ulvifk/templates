@@ -204,6 +204,10 @@ Project-specific capability forwarding is explicit. A project can subclass
 the appropriate items returned by `get_pricing_problems()`. A generic group cannot
 decide which subproblem should receive a domain restriction.
 
+A `BranchAndPriceConfig` serves one search. The node selector keeps the open nodes,
+and project components such as builders may keep state of their own, so each search
+gets a freshly built config and solver.
+
 To replace a component, implement its interface and supply it through
 `BranchAndPriceConfig` or the relevant builder. Simple data such as nodes, duals,
 and results stays concrete; projects extend it where needed. No registry or

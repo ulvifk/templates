@@ -32,6 +32,8 @@ from template.solvers.branch_and_price_solver.timing.clock import Clock
 
 @dataclass(frozen=True, slots=True)
 class BranchAndPriceConfig:
+    """Serves one search: the node selector and the project components keep its state."""
+
     time_limit_seconds: float
     clock: Clock
 

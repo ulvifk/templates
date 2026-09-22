@@ -34,9 +34,6 @@ from template.solvers.branch_and_price_solver.progress.progress_table import (
 )
 from template.solvers.branch_and_price_solver.search_summary import SearchSummary
 from template.solvers.branch_and_price_solver.timing.node_step import NodeStep
-from tests.solvers.branch_and_price_solver import (
-    test_branch_and_price_solver as solver_tests,
-)
 from tests.solvers.branch_and_price_solver.test_branch_and_price_solver import (
     FakeClock,
     NodeDurationObserver,
@@ -186,12 +183,13 @@ def test_the_debug_block_reports_only_the_steps_the_node_reached() -> None:
 
 
 def test_zero_objective_logging_does_not_crash_when_info_is_disabled(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setattr(solver_tests, "ROOT_OBJECTIVE", 0.0)
-    monkeypatch.setattr(solver_tests, "CHILD_OBJECTIVES", (0.0, 0.0))
     caplog.set_level(logging.WARNING)
-    config = replace(build_scripted_config(), observers=[ProgressLogger()])
+    config = replace(
+        build_scripted_config(root_objective=0.0, child_objectives=(0.0, 0.0)),
+        observers=[ProgressLogger()],
+    )
 
     result = BranchAndPriceSolver(config).solve(ProblemData())
 
@@ -226,13 +224,14 @@ def test_one_progress_logger_restarts_the_header_and_ids_for_each_search(
 
 
 def test_progress_table_reports_integrality_for_a_pruned_integral_node(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setattr(solver_tests, "ROOT_OBJECTIVE", 0.0)
-    monkeypatch.setattr(solver_tests, "CHILD_OBJECTIVES", (10.0, 10.0))
     caplog.set_level(logging.DEBUG)
     observer = RecordingObserver()
-    config = replace(build_scripted_config(), observers=[observer, ProgressLogger()])
+    config = replace(
+        build_scripted_config(root_objective=0.0, child_objectives=(10.0, 10.0)),
+        observers=[observer, ProgressLogger()],
+    )
 
     BranchAndPriceSolver(config).solve(ProblemData())
 
