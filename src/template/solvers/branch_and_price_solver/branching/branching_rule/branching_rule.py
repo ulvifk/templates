@@ -1,23 +1,14 @@
 from abc import ABC, abstractmethod
-from dataclasses import replace
 
 from template.solvers.branch_and_price_solver.branching.branch_node import BranchNode
-from template.solvers.branch_and_price_solver.branching.branching_decision import (
-    BranchingDecision,
-)
+from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluation
 
 
 class BranchingRule(ABC):
-    # returns the children that split the node's fractionality, read from the node's
-    # master relaxation solution; only called when the master found the node
-    # fractional
+    # returns the children that split the node's fractionality, read from the
+    # evaluation's relaxation solution; only called on a fractional node; a child
+    # appends its decision to the node's and inherits the node's bound
     @abstractmethod
-    def get_children(self, node: BranchNode) -> list[BranchNode]: ...
-
-    @staticmethod
-    def _build_child(node: BranchNode, decision: BranchingDecision) -> BranchNode:
-        return replace(
-            node,
-            branching_decisions=(*node.branching_decisions, decision),
-            master_relaxation_solution={},
-        )
+    def get_children(
+        self, node: BranchNode, evaluation: NodeEvaluation
+    ) -> list[BranchNode]: ...

@@ -9,10 +9,7 @@ from template.model.solve_result import SolveResult
 from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
 )
-from template.solvers.branch_and_price_solver.branching.branch_node import (
-    BranchNode,
-    BranchNodeFactory,
-)
+from template.solvers.branch_and_price_solver.branching.branch_node import BranchNode
 from template.solvers.branch_and_price_solver.column_generation.column import Column
 from template.solvers.branch_and_price_solver.column_generation.column_generation_result import (
     ColumnGenerationResult,
@@ -90,7 +87,8 @@ class BranchAndPriceSolver(Solver, ABC):
         self._started_at = self._config.clock.now_seconds()
         self._deadline = self._started_at + self._config.time_limit_seconds
 
-        self._config.node_selector.push([BranchNodeFactory.build_root()])
+        root = BranchNode(branching_decisions=(), lower_bound=-math.inf)
+        self._config.node_selector.push([root])
 
     def _explore_node(self, node: BranchNode) -> ExploredNode:
         self._explored_node_count += 1
@@ -117,14 +115,13 @@ class BranchAndPriceSolver(Solver, ABC):
         master.dispose()
 
         node.lower_bound = evaluation.lower_bound
-        node.master_relaxation_solution = evaluation.relaxation_solution
         self._record_root_bound(evaluation.lower_bound)
 
         outcome = self._settle_node(evaluation)
 
         children: list[BranchNode] = []
         if outcome is NodeOutcome.BRANCHED:
-            children = self._config.branching_rule.get_children(node)
+            children = self._config.branching_rule.get_children(node, evaluation)
             step_timer.finish_step(NodeStep.BRANCHING)
             self._config.node_selector.push(children)
 

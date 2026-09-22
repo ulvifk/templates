@@ -20,10 +20,7 @@ from template.solvers.branch_and_price_solver.branch_and_price_observer import (
 from template.solvers.branch_and_price_solver.branch_and_price_solver import (
     BranchAndPriceSolver,
 )
-from template.solvers.branch_and_price_solver.branching.branch_node import (
-    BranchNode,
-    BranchNodeFactory,
-)
+from template.solvers.branch_and_price_solver.branching.branch_node import BranchNode
 from template.solvers.branch_and_price_solver.branching.branching_decision import (
     BranchingDecision,
 )
@@ -189,12 +186,13 @@ class FakeBranchAndPriceSolver(BranchAndPriceSolver):
 class FakeBranchingRule(BranchingRule):
     """Splits a node into one child per scripted child objective."""
 
-    def get_children(self, node: BranchNode) -> list[BranchNode]:
+    def get_children(
+        self, node: BranchNode, evaluation: NodeEvaluation
+    ) -> list[BranchNode]:
         return [
             BranchNode(
                 branching_decisions=node.branching_decisions,
                 lower_bound=node.lower_bound,
-                master_relaxation_solution={},
             )
             for _ in CHILD_OBJECTIVES
         ]
@@ -397,12 +395,10 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
     left = BranchNode(
         branching_decisions=(left_decision, second_left_decision),
         lower_bound=-math.inf,
-        master_relaxation_solution={},
     )
     right = BranchNode(
         branching_decisions=(right_decision,),
         lower_bound=-math.inf,
-        master_relaxation_solution={},
     )
     branching_rule = Mock(spec=BranchingRule)
     branching_rule.get_children.return_value = [left, right]
@@ -455,40 +451,45 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
     right_decision.apply_to_pricing.assert_called_once_with(pricers[2])
 
 
-def test_decisions_are_applied_to_both_models_before_column_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    master = Mock(spec=MasterProblem)
-    pricer = Mock(spec=PricingProblem)
+def test_decisions_are_applied_to_both_models_before_column_generation() -> None:
+    root_master = FakeMasterProblem(10.0)
+    child_master = Mock(spec=MasterProblem)
     master_problem_builder = Mock(spec=MasterProblemBuilder)
-    master_problem_builder.build.return_value = master
+    master_problem_builder.build.side_effect = [root_master, child_master]
+    root_pricer = Mock(spec=PricingProblem)
+    child_pricer = Mock(spec=PricingProblem)
     pricing_problem_builder = Mock(spec=PricingProblemBuilder)
-    pricing_problem_builder.build.return_value = pricer
+    pricing_problem_builder.build.side_effect = [root_pricer, child_pricer]
     column_generation = Mock(spec=ColumnGeneration)
-    column_generation.run.return_value = ColumnGenerationResult(
-        status=ColumnGenerationStatus.INFEASIBLE,
-        relaxation_objective=math.inf,
-        round_count=1,
-        new_column_count=0,
-    )
+    column_generation.run.side_effect = [
+        ColumnGenerationResult(
+            status=ColumnGenerationStatus.CONVERGED,
+            relaxation_objective=10.0,
+            round_count=1,
+            new_column_count=0,
+        ),
+        ColumnGenerationResult(
+            status=ColumnGenerationStatus.INFEASIBLE,
+            relaxation_objective=math.inf,
+            round_count=1,
+            new_column_count=0,
+        ),
+    ]
     first = Mock(spec=BranchingDecision)
     second = Mock(spec=BranchingDecision)
     manager = Mock()
     manager.attach_mock(first, "first")
     manager.attach_mock(second, "second")
     manager.attach_mock(column_generation, "column_generation")
-    root = BranchNode(
-        branching_decisions=(first, second),
-        lower_bound=-math.inf,
-        master_relaxation_solution={},
-    )
-    monkeypatch.setattr(BranchNodeFactory, "build_root", lambda: root)
+    child = BranchNode(branching_decisions=(first, second), lower_bound=10.0)
+    branching_rule = Mock(spec=BranchingRule)
+    branching_rule.get_children.return_value = [child]
     solver = FakeBranchAndPriceSolver(
         BranchAndPriceConfig(
             time_limit_seconds=1000.0,
             clock=FakeClock(),
             node_selector=BestFirstNodeSelector(),
-            branching_rule=Mock(spec=BranchingRule),
+            branching_rule=branching_rule,
             master_problem_builder=master_problem_builder,
             pricing_problem_builder=pricing_problem_builder,
             column_generation=column_generation,
@@ -501,12 +502,29 @@ def test_decisions_are_applied_to_both_models_before_column_generation(
     solver.solve(ProblemData())
 
     assert manager.mock_calls == [
-        call.first.apply_to_master(master),
-        call.second.apply_to_master(master),
-        call.first.apply_to_pricing(pricer),
-        call.second.apply_to_pricing(pricer),
-        call.column_generation.run(master, pricer, ANY, ANY),
+        call.column_generation.run(root_master, root_pricer, ANY, ANY),
+        call.first.apply_to_master(child_master),
+        call.second.apply_to_master(child_master),
+        call.first.apply_to_pricing(child_pricer),
+        call.second.apply_to_pricing(child_pricer),
+        call.column_generation.run(child_master, child_pricer, ANY, ANY),
     ]
+
+
+def test_the_branching_rule_reads_the_relaxation_from_the_evaluation() -> None:
+    branching_rule = Mock(spec=BranchingRule)
+    branching_rule.get_children.return_value = []
+    config = replace(build_scripted_config(), branching_rule=branching_rule)
+
+    FakeBranchAndPriceSolver(config).solve(ProblemData())
+
+    ((root, evaluation),) = [
+        called.args for called in branching_rule.get_children.call_args_list
+    ]
+    assert root.branching_decisions == ()
+    assert evaluation.relaxation_solution == {
+        FakeColumn(cost=ROOT_OBJECTIVE, key=(1,)): 1.0
+    }
 
 
 def test_the_node_lower_bound_generator_sets_the_node_bound() -> None:

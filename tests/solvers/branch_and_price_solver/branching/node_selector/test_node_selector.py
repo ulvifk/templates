@@ -13,12 +13,10 @@ def test_depth_first_pops_the_first_pushed_child_first() -> None:
     first = BranchNode(
         branching_decisions=(),
         lower_bound=1.0,
-        master_relaxation_solution={},
     )
     second = BranchNode(
         branching_decisions=(),
         lower_bound=2.0,
-        master_relaxation_solution={},
     )
     selector = DepthFirstNodeSelector()
 
@@ -36,12 +34,10 @@ def test_depth_first_reports_the_smallest_bound_it_holds() -> None:
             BranchNode(
                 branching_decisions=(),
                 lower_bound=5.0,
-                master_relaxation_solution={},
             ),
             BranchNode(
                 branching_decisions=(),
                 lower_bound=3.0,
-                master_relaxation_solution={},
             ),
         ]
     )
@@ -53,12 +49,10 @@ def test_best_first_pops_the_node_with_the_lowest_bound() -> None:
     worst = BranchNode(
         branching_decisions=(),
         lower_bound=9.0,
-        master_relaxation_solution={},
     )
     best = BranchNode(
         branching_decisions=(),
         lower_bound=2.0,
-        master_relaxation_solution={},
     )
     selector = BestFirstNodeSelector()
 
@@ -72,12 +66,10 @@ def test_best_first_keeps_insertion_order_on_equal_bounds() -> None:
     first = BranchNode(
         branching_decisions=(),
         lower_bound=4.0,
-        master_relaxation_solution={},
     )
     second = BranchNode(
         branching_decisions=(),
         lower_bound=4.0,
-        master_relaxation_solution={},
     )
     selector = BestFirstNodeSelector()
 

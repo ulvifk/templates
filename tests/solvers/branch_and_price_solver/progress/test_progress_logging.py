@@ -49,7 +49,6 @@ INFEASIBLE_NODE = ExploredNode(
             Mock(spec=BranchingDecision),
         ),
         lower_bound=math.inf,
-        master_relaxation_solution={},
     ),
     outcome=NodeOutcome.INFEASIBLE,
     compatible_column_count=142,

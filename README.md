@@ -147,12 +147,15 @@ constructor instead.
 A project typically plugs in the relaxation bound, or its ceiling when every objective
 coefficient is integer, and either an integer restricted master heuristic or nothing.
 
-One column pool is shared by the tree. Each node stores its complete accumulated
-decisions in `branching_decisions: tuple[BranchingDecision, ...]`.
-The root starts with an empty tuple. `BranchingRule.get_children(node)` creates
-the children. Its `_build_child(node, decision)` helper appends the new
-decision to the inherited ones, retains the parent's lower bound, and clears
-the relaxation solution.
+One column pool is shared by the tree. A `BranchNode` holds only its complete
+accumulated decisions, `branching_decisions: tuple[BranchingDecision, ...]`, and its
+lower bound. The root starts with an empty tuple and a bound of negative infinity.
+`BranchingRule.get_children(node, evaluation)` creates the children and reads the
+node's relaxation from `evaluation.relaxation_solution`; when branching needs more
+data, it becomes a `NodeEvaluation` field filled in `_evaluate_node`, and existing
+rules stay unchanged. A rule builds each child as
+`BranchNode((*node.branching_decisions, decision), node.lower_bound)`: the new
+decision appended to the inherited ones, and the node's bound inherited.
 
 Each project's `BranchingDecision` subclasses carry the branch choice and enforce it
 themselves; the builders, the master, the pricer, the column generation, and `Duals`
@@ -287,11 +290,10 @@ bound shows `inf`, and a missing incumbent shows `-`.
 - `search_summary.py`: how the search ended.
 - `branch_and_price_observer.py`: the per-node and end-of-search hooks the solver
   reports to.
-- `branching/branch_node.py`: branching decisions, relaxation bound,
-  `master_relaxation_solution`, and the root factory.
+- `branching/branch_node.py`: branching decisions and lower bound.
 - `branching/branching_decision.py`: the branch choice that filters columns and
   enforces itself on the master and the pricer.
-- `branching/branching_rule/branching_rule.py`: the branching hook and child construction.
+- `branching/branching_rule/branching_rule.py`: the branching hook.
 - `branching/node_selector/`: best-first and depth-first node selection.
 - `column_generation/column.py` and `column_pool.py`: column identity and storage.
 - `column_generation/master/`: the master interface, which also reports the node's
@@ -321,11 +323,13 @@ bound shows `inf`, and a missing incumbent shows `-`.
 Components scripted through the config (masters, pricers, and trees) test the
 generic loops: convergence, deduplication, pruning, incumbent selection, bounds,
 infeasibility, and timeouts on a fake clock.
-`test_branching_extensions.py` is a working example with a small covering master
-and finite pricing subproblems. Its rows, decisions, and dual data are defined only
-in the example. It checks multiple node decisions, coefficients for
-initial and priced columns, changing row duals, and convergence, with progress
-logging both enabled and disabled. It needs no optimization solver license.
+`test_covering_example.py` is a working example with a small covering master and
+finite pricing subproblems combined by `CompositePricingProblem`. Its rows and dual
+data are defined only in the example, and the builders add the rows to every master
+and pricer they build. It checks coefficients for initial and priced columns,
+changing row duals, and convergence, with progress logging both enabled and
+disabled. Tests start every search from the empty root; decisions are tested on
+branched children. It needs no optimization solver license.
 Formulation and pricing tests belong in the project built from this template.
 
 ### `local_search`

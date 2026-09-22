@@ -18,10 +18,6 @@ from template.solvers.branch_and_price_solver.branch_and_price_solver import (
 )
 from template.solvers.branch_and_price_solver.branching.branch_node import (
     BranchNode,
-    BranchNodeFactory,
-)
-from template.solvers.branch_and_price_solver.branching.branching_decision import (
-    BranchingDecision,
 )
 from template.solvers.branch_and_price_solver.branching.branching_rule.branching_rule import (
     BranchingRule,
@@ -56,6 +52,7 @@ from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator
     NodeIncumbentGenerator,
 )
 from template.solvers.branch_and_price_solver.node_context import NodeContext
+from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluation
 from template.solvers.branch_and_price_solver.progress.progress_logger import (
     ProgressLogger,
 )
@@ -72,7 +69,7 @@ class CategoryColumn(Column):
 
 
 @dataclass(frozen=True, slots=True)
-class CategoryBranchingRow:
+class CoveringRow:
     lower_bound: float
     upper_bound: float
     category: str
@@ -84,14 +81,14 @@ class CategoryBranchingRow:
 
 @dataclass(frozen=True, slots=True)
 class CoveringDuals(Duals):
-    branching_row_duals: dict[CategoryBranchingRow, float]
+    row_duals: dict[CoveringRow, float]
 
 
 class CoveringMasterProblem(MasterProblem):
     """Solves disjoint covering rows with positive costs and a feasible seed per row."""
 
     _columns: list[Column]
-    _branching_rows: list[CategoryBranchingRow]
+    _rows: list[CoveringRow]
     _duals: CoveringDuals
     _relaxation_solution: dict[Column, float]
     _objective: float
@@ -101,10 +98,10 @@ class CoveringMasterProblem(MasterProblem):
     solve_objectives: list[float]
     dual_history: list[CoveringDuals]
 
-    def __init__(self, columns: list[Column]) -> None:
+    def __init__(self, columns: list[Column], rows: list[CoveringRow]) -> None:
         self._columns = columns
-        self._branching_rows = []
-        self._duals = CoveringDuals(branching_row_duals={})
+        self._rows = rows
+        self._duals = CoveringDuals(row_duals={})
         self._relaxation_solution = {}
         self._objective = math.inf
         self._feasible = False
@@ -114,25 +111,19 @@ class CoveringMasterProblem(MasterProblem):
         self.dual_history = []
 
     @property
-    def branching_rows(self) -> list[CategoryBranchingRow]:
-        return self._branching_rows
+    def rows(self) -> list[CoveringRow]:
+        return self._rows
 
     def add_columns(self, columns: list[Column]) -> None:
         self._columns.extend(columns)
 
-    def add_branching_row(self, row: CategoryBranchingRow) -> None:
-        if row in self._branching_rows:
-            return
-
-        self._branching_rows.append(row)
-
     def solve_relaxation(self) -> float:
         self._relaxation_solution = {}
-        row_duals: dict[CategoryBranchingRow, float] = {}
+        row_duals: dict[CoveringRow, float] = {}
         self._objective = 0.0
         self._feasible = True
 
-        for row in self._branching_rows:
+        for row in self._rows:
             candidates = [
                 column for column in self._columns if row.get_coefficient(column) > 0.0
             ]
@@ -152,7 +143,7 @@ class CoveringMasterProblem(MasterProblem):
             self._relaxation_solution[best_column] = value
             self._objective += best_column.cost * value
 
-        self._duals = CoveringDuals(branching_row_duals=row_duals)
+        self._duals = CoveringDuals(row_duals=row_duals)
         self.solve_objectives.append(self._objective)
         self.dual_history.append(self._duals)
 
@@ -179,15 +170,18 @@ class CoveringMasterProblem(MasterProblem):
 
 class CoveringMasterProblemBuilder(MasterProblemBuilder):
     _initial_columns: list[Column]
+    _rows: list[CoveringRow]
 
     built_masters: list[CoveringMasterProblem]
 
-    def __init__(self, initial_columns: list[Column]) -> None:
+    def __init__(self, initial_columns: list[Column], rows: list[CoveringRow]) -> None:
         self._initial_columns = initial_columns
+        self._rows = rows
+
         self.built_masters = []
 
     def build(self, columns: list[Column]) -> CoveringMasterProblem:
-        master = CoveringMasterProblem([*self._initial_columns, *columns])
+        master = CoveringMasterProblem([*self._initial_columns, *columns], self._rows)
         self.built_masters.append(master)
 
         return master
@@ -195,29 +189,25 @@ class CoveringMasterProblemBuilder(MasterProblemBuilder):
 
 class CategoryPricingProblem(PricingProblem):
     _candidates: tuple[CategoryColumn, ...]
-    _branching_rows: list[CategoryBranchingRow]
+    _rows: list[CoveringRow]
 
     dual_history: list[CoveringDuals]
     reduced_cost_history: list[list[float]]
     disposed: bool
 
-    def __init__(self, candidates: tuple[CategoryColumn, ...]) -> None:
+    def __init__(
+        self, candidates: tuple[CategoryColumn, ...], rows: list[CoveringRow]
+    ) -> None:
         self._candidates = candidates
-        self._branching_rows = []
+        self._rows = rows
 
         self.dual_history = []
         self.reduced_cost_history = []
         self.disposed = False
 
     @property
-    def branching_rows(self) -> list[CategoryBranchingRow]:
-        return self._branching_rows
-
-    def add_branching_row(self, row: CategoryBranchingRow) -> None:
-        if row in self._branching_rows:
-            return
-
-        self._branching_rows.append(row)
+    def rows(self) -> list[CoveringRow]:
+        return self._rows
 
     def price(self, duals: Duals) -> list[Column]:
         covering_duals = cast(CoveringDuals, duals)
@@ -227,10 +217,10 @@ class CategoryPricingProblem(PricingProblem):
 
         for candidate in self._candidates:
             reduced_cost = candidate.cost
-            for row in self._branching_rows:
-                reduced_cost -= covering_duals.branching_row_duals[
-                    row
-                ] * row.get_coefficient(candidate)
+            for row in self._rows:
+                reduced_cost -= covering_duals.row_duals[row] * row.get_coefficient(
+                    candidate
+                )
             reduced_costs.append(reduced_cost)
             if reduced_cost < 0.0:
                 improving_columns.append(candidate)
@@ -243,34 +233,37 @@ class CategoryPricingProblem(PricingProblem):
         self.disposed = True
 
 
-class CoveringCompositePricingProblem(CompositePricingProblem[CategoryPricingProblem]):
-    def add_branching_row(self, row: CategoryBranchingRow) -> None:
-        for pricing_problem in self.get_pricing_problems():
-            pricing_problem.add_branching_row(row)
-
-
 class CoveringPricingProblemBuilder(PricingProblemBuilder):
     _candidate_pools: tuple[tuple[CategoryColumn, ...], ...]
+    _rows: list[CoveringRow]
 
-    built_pricing_problems: list[CoveringCompositePricingProblem]
+    built_pricing_problems: list[CompositePricingProblem[CategoryPricingProblem]]
 
-    def __init__(self, candidate_pools: tuple[tuple[CategoryColumn, ...], ...]) -> None:
+    def __init__(
+        self,
+        candidate_pools: tuple[tuple[CategoryColumn, ...], ...],
+        rows: list[CoveringRow],
+    ) -> None:
         self._candidate_pools = candidate_pools
+        self._rows = rows
+
         self.built_pricing_problems = []
 
-    def build(self) -> CoveringCompositePricingProblem:
+    def build(self) -> CompositePricingProblem[CategoryPricingProblem]:
         components = [
-            CategoryPricingProblem(candidate_pool)
+            CategoryPricingProblem(candidate_pool, self._rows)
             for candidate_pool in self._candidate_pools
         ]
-        pricing_problem = CoveringCompositePricingProblem(components)
+        pricing_problem = CompositePricingProblem(components)
         self.built_pricing_problems.append(pricing_problem)
 
         return pricing_problem
 
 
 class NoBranchingRule(BranchingRule):
-    def get_children(self, node: BranchNode) -> list[BranchNode]:
+    def get_children(
+        self, node: BranchNode, evaluation: NodeEvaluation
+    ) -> list[BranchNode]:
         return []
 
 
@@ -287,24 +280,6 @@ class NoIncumbentGenerator(NodeIncumbentGenerator):
 class CoveringBranchAndPriceSolver(BranchAndPriceSolver):
     def _extract_solution(self, column_values: dict[Column, float]) -> Solution:
         return Solution()
-
-
-@dataclass(frozen=True, slots=True)
-class CategoryBranchingDecision(
-    BranchingDecision[CoveringMasterProblem, CoveringCompositePricingProblem]
-):
-    row: CategoryBranchingRow
-
-    def is_column_compatible(self, column: Column) -> bool:
-        return True
-
-    def apply_to_master(self, master: CoveringMasterProblem) -> None:
-        master.add_branching_row(self.row)
-
-    def apply_to_pricing(
-        self, pricing_problem: CoveringCompositePricingProblem
-    ) -> None:
-        pricing_problem.add_branching_row(self.row)
 
 
 def build_covering_config(
@@ -325,34 +300,25 @@ def build_covering_config(
     )
 
 
-def build_rows() -> tuple[CategoryBranchingRow, CategoryBranchingRow]:
+def build_rows() -> tuple[CoveringRow, CoveringRow]:
     return (
-        CategoryBranchingRow(lower_bound=1.0, upper_bound=math.inf, category="red"),
-        CategoryBranchingRow(lower_bound=1.0, upper_bound=math.inf, category="blue"),
+        CoveringRow(lower_bound=1.0, upper_bound=math.inf, category="red"),
+        CoveringRow(lower_bound=1.0, upper_bound=math.inf, category="blue"),
     )
 
 
 @pytest.mark.parametrize("logging_enabled", [False, True])
-def test_branching_decisions_drive_initial_and_priced_columns_to_convergence(
-    monkeypatch: pytest.MonkeyPatch, logging_enabled: bool
+def test_covering_rows_drive_initial_and_priced_columns_to_convergence(
+    logging_enabled: bool,
 ) -> None:
     red_row, blue_row = build_rows()
     red_seed = CategoryColumn(cost=10.0, category="red", name="seed")
     blue_seed = CategoryColumn(cost=10.0, category="blue", name="seed")
     red_cheap = CategoryColumn(cost=2.0, category="red", name="cheap")
     blue_cheap = CategoryColumn(cost=3.0, category="blue", name="cheap")
-    root = BranchNode(
-        branching_decisions=(
-            CategoryBranchingDecision(red_row),
-            CategoryBranchingDecision(blue_row),
-        ),
-        lower_bound=-math.inf,
-        master_relaxation_solution={},
-    )
-    monkeypatch.setattr(BranchNodeFactory, "build_root", lambda: root)
-
-    master_builder = CoveringMasterProblemBuilder([red_seed, blue_seed])
-    pricing_builder = CoveringPricingProblemBuilder(((red_cheap,), (blue_cheap,)))
+    rows = [red_row, blue_row]
+    master_builder = CoveringMasterProblemBuilder([red_seed, blue_seed], rows)
+    pricing_builder = CoveringPricingProblemBuilder(((red_cheap,), (blue_cheap,)), rows)
     config = build_covering_config(master_builder, pricing_builder)
     if logging_enabled:
         config = replace(config, observers=[ProgressLogger()])
@@ -365,9 +331,9 @@ def test_branching_decisions_drive_initial_and_priced_columns_to_convergence(
     assert result.meta_data["explored_node_count"] == 1
 
     master = master_builder.built_masters[0]
-    assert master.branching_rows == [red_row, blue_row]
+    assert master.rows == [red_row, blue_row]
     assert master.solve_objectives == [20.0, 5.0]
-    assert [duals.branching_row_duals for duals in master.dual_history] == [
+    assert [duals.row_duals for duals in master.dual_history] == [
         {red_row: 10.0, blue_row: 10.0},
         {red_row: 2.0, blue_row: 3.0},
     ]
@@ -383,13 +349,13 @@ def test_branching_decisions_drive_initial_and_priced_columns_to_convergence(
 
     composite_pricing_problem = pricing_builder.built_pricing_problems[0]
     red_pricer, blue_pricer = composite_pricing_problem.get_pricing_problems()
-    assert red_pricer.branching_rows == [red_row, blue_row]
-    assert blue_pricer.branching_rows == [red_row, blue_row]
-    assert [dual.branching_row_duals for dual in red_pricer.dual_history] == [
+    assert red_pricer.rows == [red_row, blue_row]
+    assert blue_pricer.rows == [red_row, blue_row]
+    assert [dual.row_duals for dual in red_pricer.dual_history] == [
         {red_row: 10.0, blue_row: 10.0},
         {red_row: 2.0, blue_row: 3.0},
     ]
-    assert [dual.branching_row_duals for dual in blue_pricer.dual_history] == [
+    assert [dual.row_duals for dual in blue_pricer.dual_history] == [
         {red_row: 10.0, blue_row: 10.0},
         {red_row: 2.0, blue_row: 3.0},
     ]

@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 
 from template.solvers.branch_and_price_solver.branching.branching_decision import (
@@ -15,14 +14,10 @@ from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_
 
 @dataclass
 class BranchNode:
-    """A node's branching decisions and solved relaxation."""
+    """A node's accumulated branching decisions and its bound."""
 
     branching_decisions: tuple[BranchingDecision, ...]
-
-    # the parent's bound until the node is solved, then its own
-    lower_bound: float
-    # [column] -> value in the node's relaxation; empty until the node is solved
-    master_relaxation_solution: dict[Column, float]
+    lower_bound: float  # the parent's bound until the node is solved, then its own
 
     def is_column_compatible(self, column: Column) -> bool:
         return all(
@@ -37,13 +32,3 @@ class BranchNode:
     def apply_to_pricing(self, pricing_problem: PricingProblem) -> None:
         for decision in self.branching_decisions:
             decision.apply_to_pricing(pricing_problem)
-
-
-class BranchNodeFactory:
-    @staticmethod
-    def build_root() -> BranchNode:
-        return BranchNode(
-            branching_decisions=(),
-            lower_bound=-math.inf,
-            master_relaxation_solution={},
-        )
