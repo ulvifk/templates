@@ -11,6 +11,9 @@ from template.model.solution.solution import Solution
 from template.solvers.branch_and_price_solver.bounding.node_lower_bound_generator import (
     NodeLowerBoundGenerator,
 )
+from template.solvers.branch_and_price_solver.bounding.relaxation_lower_bound_generator import (
+    RelaxationLowerBoundGenerator,
+)
 from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
 )
@@ -60,6 +63,9 @@ from template.solvers.branch_and_price_solver.column_generation.standard_column_
 )
 from template.solvers.branch_and_price_solver.explored_node import ExploredNode
 from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbent
+from template.solvers.branch_and_price_solver.incumbent.no_incumbent_generator import (
+    NoIncumbentGenerator,
+)
 from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
     NodeIncumbentGenerator,
 )
@@ -201,25 +207,11 @@ class FakeBranchingRule(BranchingRule):
         ]
 
 
-class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
-    """Reports the relaxation bound unchanged."""
-
-    def generate(self, context: NodeContext) -> float:
-        return context.column_generation_result.relaxation_objective
-
-
 class IncrementedLowerBoundGenerator(NodeLowerBoundGenerator):
     """Reports a bound one unit above the relaxation."""
 
     def generate(self, context: NodeContext) -> float:
         return context.column_generation_result.relaxation_objective + 1.0
-
-
-class NullIncumbentGenerator(NodeIncumbentGenerator):
-    """Finds nothing on any node."""
-
-    def generate(self, context: NodeContext) -> Incumbent | None:
-        return None
 
 
 class ScriptedIncumbentGenerator(NodeIncumbentGenerator):
@@ -230,7 +222,7 @@ class ScriptedIncumbentGenerator(NodeIncumbentGenerator):
 
 
 RELAXATION_LOWER_BOUND_GENERATOR = RelaxationLowerBoundGenerator()
-NULL_INCUMBENT_GENERATOR = NullIncumbentGenerator()
+NO_INCUMBENT_GENERATOR = NoIncumbentGenerator()
 
 
 def build_scripted_config(
@@ -238,7 +230,7 @@ def build_scripted_config(
     feasible: bool = True,
     root_is_integral: bool = False,
     node_lower_bound_generator: NodeLowerBoundGenerator = RELAXATION_LOWER_BOUND_GENERATOR,
-    node_incumbent_generator: NodeIncumbentGenerator = NULL_INCUMBENT_GENERATOR,
+    node_incumbent_generator: NodeIncumbentGenerator = NO_INCUMBENT_GENERATOR,
 ) -> BranchAndPriceConfig:
     root_master = FakeMasterProblem(ROOT_OBJECTIVE, feasible, root_is_integral)
     child_masters = [
@@ -266,7 +258,7 @@ def solve_scripted_tree(
     feasible: bool = True,
     root_is_integral: bool = False,
     node_lower_bound_generator: NodeLowerBoundGenerator = RELAXATION_LOWER_BOUND_GENERATOR,
-    node_incumbent_generator: NodeIncumbentGenerator = NULL_INCUMBENT_GENERATOR,
+    node_incumbent_generator: NodeIncumbentGenerator = NO_INCUMBENT_GENERATOR,
 ) -> dict[str, Any]:
     config = build_scripted_config(
         time_limit_seconds,
@@ -435,7 +427,7 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
             pricing_problem_builder=pricing_problem_builder,
             column_generation=StandardColumnGeneration(),
             node_lower_bound_generator=RELAXATION_LOWER_BOUND_GENERATOR,
-            node_incumbent_generator=NULL_INCUMBENT_GENERATOR,
+            node_incumbent_generator=NO_INCUMBENT_GENERATOR,
             solution_extractor=EmptySolutionExtractor(),
             observers=[],
         )
@@ -503,7 +495,7 @@ def test_decisions_are_applied_to_both_models_before_column_generation() -> None
             pricing_problem_builder=pricing_problem_builder,
             column_generation=column_generation,
             node_lower_bound_generator=RELAXATION_LOWER_BOUND_GENERATOR,
-            node_incumbent_generator=NULL_INCUMBENT_GENERATOR,
+            node_incumbent_generator=NO_INCUMBENT_GENERATOR,
             solution_extractor=EmptySolutionExtractor(),
             observers=[],
         )

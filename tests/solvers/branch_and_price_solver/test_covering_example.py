@@ -7,8 +7,8 @@ import pytest
 
 from template.model.data.problem_data import ProblemData
 from template.model.solution.solution import Solution
-from template.solvers.branch_and_price_solver.bounding.node_lower_bound_generator import (
-    NodeLowerBoundGenerator,
+from template.solvers.branch_and_price_solver.bounding.relaxation_lower_bound_generator import (
+    RelaxationLowerBoundGenerator,
 )
 from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
@@ -47,11 +47,9 @@ from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_
 from template.solvers.branch_and_price_solver.column_generation.standard_column_generation import (
     StandardColumnGeneration,
 )
-from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbent
-from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
-    NodeIncumbentGenerator,
+from template.solvers.branch_and_price_solver.incumbent.no_incumbent_generator import (
+    NoIncumbentGenerator,
 )
-from template.solvers.branch_and_price_solver.node_context import NodeContext
 from template.solvers.branch_and_price_solver.node_evaluation import NodeEvaluation
 from template.solvers.branch_and_price_solver.progress.progress_logger import (
     ProgressLogger,
@@ -268,16 +266,6 @@ class NoBranchingRule(BranchingRule):
         self, node: BranchNode, evaluation: NodeEvaluation
     ) -> list[BranchNode]:
         return []
-
-
-class RelaxationLowerBoundGenerator(NodeLowerBoundGenerator):
-    def generate(self, context: NodeContext) -> float:
-        return context.column_generation_result.relaxation_objective
-
-
-class NoIncumbentGenerator(NodeIncumbentGenerator):
-    def generate(self, context: NodeContext) -> Incumbent | None:
-        return None
 
 
 class EmptySolutionExtractor(SolutionExtractor):

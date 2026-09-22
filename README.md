@@ -145,8 +145,9 @@ master, the column generation result, and the incumbent objective so far. A gene
 that needs more search state gets a new `NodeContext` field, and existing generators
 stay unchanged; project data such as `ProblemData` goes into the generator's
 constructor instead.
-A project typically plugs in the relaxation bound, or its ceiling when every objective
-coefficient is integer, and either an integer restricted master heuristic or nothing.
+A project typically plugs in the shipped `RelaxationLowerBoundGenerator`, or its
+ceiling when every objective coefficient is integer, and either an integer restricted
+master heuristic or the shipped `NoIncumbentGenerator`.
 
 One column pool is shared by the tree. A `BranchNode` holds only its complete
 accumulated decisions, `branching_decisions: tuple[BranchingDecision, ...]`, and its
@@ -313,9 +314,10 @@ bound shows `inf`, and a missing incumbent shows `-`.
 - `column_generation/standard_column_generation.py`: the shipped solve-price-add loop.
 - `column_generation/column_generation_status.py` and `column_generation_result.py`:
   convergence status, relaxation objective, round count, and new column count.
-- `bounding/`: the node lower bound interface.
-- `incumbent/`: `Incumbent` is an objective with the column values behind it, and the
-  generator interface.
+- `bounding/`: the node lower bound interface and `RelaxationLowerBoundGenerator`,
+  which reports the relaxation objective.
+- `incumbent/`: `Incumbent` is an objective with the column values behind it, the
+  generator interface, and `NoIncumbentGenerator`, which finds nothing.
 - `timing/`: `Clock` and its `SystemClock`, `NodeStep` the timed steps of a node, and
   `StepTimer`, which splits a node's time into those steps.
 - `progress/`: the shipped progress logging. `progress_logger.py` is the observer that
