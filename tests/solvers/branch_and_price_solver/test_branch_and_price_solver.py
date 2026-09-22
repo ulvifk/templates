@@ -1,7 +1,6 @@
 import math
-import time
 from collections.abc import Hashable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from unittest.mock import ANY, Mock, call
 
@@ -14,6 +13,9 @@ from template.solvers.branch_and_price_solver.bounding.node_lower_bound_generato
 )
 from template.solvers.branch_and_price_solver.branch_and_price_config import (
     BranchAndPriceConfig,
+)
+from template.solvers.branch_and_price_solver.branch_and_price_observer import (
+    BranchAndPriceObserver,
 )
 from template.solvers.branch_and_price_solver.branch_and_price_solver import (
     BranchAndPriceSolver,
@@ -59,10 +61,12 @@ from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_
 from template.solvers.branch_and_price_solver.column_generation.standard_column_generation import (
     StandardColumnGeneration,
 )
+from template.solvers.branch_and_price_solver.explored_node import ExploredNode
 from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbent
 from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
     NodeIncumbentGenerator,
 )
+from template.solvers.branch_and_price_solver.timing.clock import Clock
 
 ROOT_OBJECTIVE = 10.0
 CHILD_OBJECTIVES = (12.0, 11.0)
@@ -80,6 +84,32 @@ class FakeColumn(Column):
 HEURISTIC_COLUMN_VALUES: dict[Column, float] = {
     FakeColumn(cost=HEURISTIC_OBJECTIVE, key=(9,)): 1.0
 }
+
+
+class FakeClock(Clock):
+    """Stands still until a test moves it forward."""
+
+    now: float
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def now_seconds(self) -> float:
+        return self.now
+
+
+class NodeDurationObserver(BranchAndPriceObserver):
+    """Makes every explored node take the same time on a fake clock."""
+
+    _clock: FakeClock
+    _node_seconds: float
+
+    def __init__(self, clock: FakeClock, node_seconds: float) -> None:
+        self._clock = clock
+        self._node_seconds = node_seconds
+
+    def on_node_explored(self, explored: ExploredNode) -> None:
+        self._clock.now += self._node_seconds
 
 
 class FakeMasterProblem(MasterProblem):
@@ -162,6 +192,7 @@ class FakeBranchingRule(BranchingRule):
                 branching_decisions=node.branching_decisions,
                 lower_bound=node.lower_bound,
                 master_relaxation_solution={},
+                integral=False,
             )
             for _ in CHILD_OBJECTIVES
         ]
@@ -218,6 +249,7 @@ def build_scripted_config(
 
     return BranchAndPriceConfig(
         time_limit_seconds=time_limit_seconds,
+        clock=FakeClock(),
         node_selector=BestFirstNodeSelector(),
         branching_rule=FakeBranchingRule(),
         master_problem_builder=FakeMasterProblemBuilder([root_master, *child_masters]),
@@ -297,13 +329,15 @@ def test_a_timeout_without_an_incumbent_is_time_limited() -> None:
     assert meta_data["explored_node_count"] == 0
 
 
-def test_a_timeout_with_an_incumbent_keeps_time_limit_status(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clock = iter((0.0, 1.0, 2.0, 101.0, 102.0))
-    monkeypatch.setattr(time, "perf_counter", lambda: next(clock))
+def test_a_timeout_with_an_incumbent_keeps_time_limit_status() -> None:
+    clock = FakeClock()
+    config = replace(
+        build_scripted_config(time_limit_seconds=100.0),
+        clock=clock,
+        observers=[NodeDurationObserver(clock, node_seconds=60.0)],
+    )
 
-    meta_data = solve_scripted_tree(time_limit_seconds=100.0)
+    meta_data = FakeBranchAndPriceSolver(config).solve(ProblemData()).meta_data
 
     assert meta_data["status"] == "time-limit"
     assert meta_data["objective"] == 12.0
@@ -366,11 +400,13 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
         branching_decisions=(left_decision, second_left_decision),
         lower_bound=-math.inf,
         master_relaxation_solution={},
+        integral=False,
     )
     right = BranchNode(
         branching_decisions=(right_decision,),
         lower_bound=-math.inf,
         master_relaxation_solution={},
+        integral=False,
     )
     branching_rule = Mock(spec=BranchingRule)
     branching_rule.get_children.return_value = [left, right]
@@ -392,6 +428,7 @@ def test_node_decisions_reach_both_models_and_dispose_each_pricer() -> None:
     solver = FakeBranchAndPriceSolver(
         BranchAndPriceConfig(
             time_limit_seconds=1000.0,
+            clock=FakeClock(),
             node_selector=BestFirstNodeSelector(),
             branching_rule=branching_rule,
             master_problem_builder=master_problem_builder,
@@ -433,7 +470,10 @@ def test_decisions_are_applied_to_both_models_before_column_generation(
     pricing_problem_builder.build.return_value = pricer
     column_generation = Mock(spec=ColumnGeneration)
     column_generation.run.return_value = ColumnGenerationResult(
-        status=ColumnGenerationStatus.INFEASIBLE, bound=math.inf, round_count=1
+        status=ColumnGenerationStatus.INFEASIBLE,
+        bound=math.inf,
+        round_count=1,
+        new_column_count=0,
     )
     first = Mock(spec=BranchingDecision)
     second = Mock(spec=BranchingDecision)
@@ -445,11 +485,13 @@ def test_decisions_are_applied_to_both_models_before_column_generation(
         branching_decisions=(first, second),
         lower_bound=-math.inf,
         master_relaxation_solution={},
+        integral=False,
     )
     monkeypatch.setattr(BranchNodeFactory, "build_root", lambda: root)
     solver = FakeBranchAndPriceSolver(
         BranchAndPriceConfig(
             time_limit_seconds=1000.0,
+            clock=FakeClock(),
             node_selector=BestFirstNodeSelector(),
             branching_rule=Mock(spec=BranchingRule),
             master_problem_builder=master_problem_builder,
@@ -468,7 +510,7 @@ def test_decisions_are_applied_to_both_models_before_column_generation(
         call.second.apply_to_master(master),
         call.first.apply_to_pricing(pricer),
         call.second.apply_to_pricing(pricer),
-        call.column_generation.run(master, pricer, ANY),
+        call.column_generation.run(master, pricer, ANY, ANY),
     ]
 
 

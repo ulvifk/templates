@@ -18,6 +18,8 @@ from template.solvers.branch_and_price_solver.column_generation.master.master_pr
 from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_problem import (
     PricingProblem,
 )
+from template.solvers.branch_and_price_solver.timing.node_step import NodeStep
+from template.solvers.branch_and_price_solver.timing.step_timer import StepTimer
 
 
 class StandardColumnGeneration(ColumnGeneration):
@@ -26,13 +28,18 @@ class StandardColumnGeneration(ColumnGeneration):
         master: MasterProblem,
         pricing_problem: PricingProblem,
         column_pool: ColumnPool,
+        step_timer: StepTimer,
     ) -> ColumnGenerationResult:
         round_count = 0
+        new_column_count = 0
         while True:
             objective = master.solve_relaxation()
+            duals = master.get_duals()
+            step_timer.finish_step(NodeStep.MASTER_SOLVE)
             round_count += 1
 
-            columns = pricing_problem.price(master.get_duals())
+            columns = pricing_problem.price(duals)
+            step_timer.finish_step(NodeStep.PRICING)
             if not columns:
                 break
 
@@ -43,16 +50,19 @@ class StandardColumnGeneration(ColumnGeneration):
                 )
 
             master.add_columns(fresh_columns)
+            new_column_count += len(fresh_columns)
 
         if not master.is_feasible():
             return ColumnGenerationResult(
                 status=ColumnGenerationStatus.INFEASIBLE,
                 bound=math.inf,
                 round_count=round_count,
+                new_column_count=new_column_count,
             )
 
         return ColumnGenerationResult(
             status=ColumnGenerationStatus.CONVERGED,
             bound=objective,
             round_count=round_count,
+            new_column_count=new_column_count,
         )

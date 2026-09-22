@@ -1,15 +1,12 @@
-from abc import ABC, abstractmethod
-
-from template.model.solve_result import SolveResult
 from template.solvers.branch_and_price_solver.explored_node import ExploredNode
+from template.solvers.branch_and_price_solver.search_summary import SearchSummary
 
 
-class BranchAndPriceObserver(ABC):
-    @abstractmethod
-    def on_search_started(self, started_at: float) -> None: ...
+class BranchAndPriceObserver:
+    """Hears the search's progress; an observer overrides only the events it needs."""
 
-    @abstractmethod
-    def on_node_explored(self, explored: ExploredNode) -> None: ...
+    def on_node_explored(self, explored: ExploredNode) -> None:
+        pass
 
-    @abstractmethod
-    def on_search_finished(self, result: SolveResult) -> None: ...
+    def on_search_finished(self, summary: SearchSummary) -> None:
+        pass

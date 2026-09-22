@@ -1,6 +1,6 @@
 import math
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 import pytest
@@ -58,9 +58,10 @@ from template.solvers.branch_and_price_solver.incumbent.incumbent import Incumbe
 from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
     NodeIncumbentGenerator,
 )
-from template.solvers.branch_and_price_solver.progress.progress_logging import (
-    ProgressLogging,
+from template.solvers.branch_and_price_solver.progress.progress_logger import (
+    ProgressLogger,
 )
+from template.solvers.branch_and_price_solver.timing.system_clock import SystemClock
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +317,7 @@ def build_covering_config(
 ) -> BranchAndPriceConfig:
     return BranchAndPriceConfig(
         time_limit_seconds=1000.0,
+        clock=SystemClock(),
         node_selector=BestFirstNodeSelector(),
         branching_rule=NoBranchingRule(),
         master_problem_builder=master_builder,
@@ -350,6 +352,7 @@ def test_branching_decisions_drive_initial_and_priced_columns_to_convergence(
         ),
         lower_bound=-math.inf,
         master_relaxation_solution={},
+        integral=False,
     )
     monkeypatch.setattr(BranchNodeFactory, "build_root", lambda: root)
 
@@ -357,7 +360,7 @@ def test_branching_decisions_drive_initial_and_priced_columns_to_convergence(
     pricing_builder = CoveringPricingProblemBuilder(((red_cheap,), (blue_cheap,)))
     config = build_covering_config(master_builder, pricing_builder)
     if logging_enabled:
-        config = ProgressLogging().wrap(config)
+        config = replace(config, observers=[ProgressLogger()])
 
     result = CoveringBranchAndPriceSolver(config).solve(ProblemData())
 

@@ -20,4 +20,5 @@ class BranchingRule(ABC):
             node,
             branching_decisions=(*node.branching_decisions, decision),
             master_relaxation_solution={},
+            integral=False,
         )

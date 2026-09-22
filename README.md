@@ -148,7 +148,7 @@ decisions in `branching_decisions: tuple[BranchingDecision, ...]`.
 The root starts with an empty tuple. `BranchingRule.get_children(node)` creates
 the children. Its `_build_child(node, decision)` helper appends the new
 decision to the inherited ones, retains the parent's lower bound, and clears
-the relaxation solution.
+the relaxation solution and its integrality.
 
 Each project's `BranchingDecision` subclasses carry the branch choice and enforce it
 themselves; the builders, the master, the pricer, the column generation, and `Duals`
@@ -209,7 +209,9 @@ start at negative infinity.
 
 `StandardColumnGeneration` is the shipped loop: it solves the master, prices, adds
 fresh columns, and repeats, and never sees a decision; `ColumnGeneration` is the
-abstraction a project may replace with a loop of its own. The pricer must generate
+abstraction a project may replace with a loop of its own. The loop finishes each master
+solve and each pricing call on the node's step timer, and reports its rounds and the
+columns it added. The pricer must generate
 columns compatible with the node's decisions. An empty pricing result certifies
 convergence for that node.
 The pool only deduplicates; a duplicate-only batch raises because it cannot
@@ -228,43 +230,54 @@ the time limit can overrun by one node.
 #### Progress logging
 
 ```python
-progress = ProgressLogging()
-solver = MySolver(progress.wrap(config))
-result = solver.solve(problem_data)
+config = BranchAndPriceConfig(..., observers=[ProgressLogger()])
 ```
 
-The solver calls its components directly and reports search start, the outcome of each
-node as an `ExploredNode`, and the final `SolveResult` to the config's observers.
-`ProgressLogging.wrap` returns the config with each component replaced by a timing
-wrapper and with itself registered as an observer, so a timing measures exactly the
-component call. `TimedMasterProblem` forwards the project master's capability methods
-it does not know, so the node's decisions can be applied through it. `ProgressLogging`
-builds one `NodeRecord` per node from those timings and the reported outcome and
-bounds, and hands it to `ProgressLogger`: one INFO table row per explored node, with a
-marker column: `*` the node was integral and became the incumbent, `H` the incumbent
-generator improved it and closed the node, `X` the node was infeasible, blank the node
-branched or was pruned. Components a node never reached print `-`. The summary line is
-logged when the search finishes, and at DEBUG each node also gets a per-component
-block. A project can compose the wrappers by hand instead, and one that wants another
-sink (a progress file, a database, a plot) adds its own `BranchAndPriceObserver` to
-`observers`.
+The solver measures its own steps and reports them as data; observers only format
+what they receive. Each node gets a `StepTimer` on the config's `Clock`, and after each
+step the solver, or the column generation inside its loop, calls
+`finish_step(NodeStep.X)`. A step is charged the time since the previous finished step,
+so steps leave no gaps and add up to the node's time, and a step that repeats, such as
+the master solve of every round, accumulates. `COLUMN_GENERATION` holds the column
+generation time outside master solves and pricing, so a replacement loop that finishes
+no steps still has its time in the right column. Adding a timed step takes a
+`NodeStep` member and one `finish_step` call; the progress table grows its column
+without further changes. The value of a `NodeStep` is its table header.
 
-The progress state is reset at search start, so one `ProgressLogging` instance can be
-reused. A zero incumbent and zero bound show a `0.0%` gap; a zero incumbent with a
-nonzero bound shows `inf`, and a missing incumbent shows `-`.
+After each node the observers receive an `ExploredNode`: its id, outcome, compatible
+column count, column generation result, child count, `seconds_by_step`, the elapsed
+time, and the search bounds. When the search ends they receive a `SearchSummary`,
+which the solver also turns into `meta_data`. Observer methods default to doing
+nothing, so an observer overrides only the events it needs. Tests run the solver on a
+fake clock rather than patching the system time. The design needs only interfaces,
+enums, maps, and immutable values, so it carries over to other languages as is.
+
+`ProgressLogger` writes one INFO table row per explored node, with a marker column:
+`*` the node was integral and became the incumbent, `H` the incumbent generator
+improved it and closed the node, `X` the node was infeasible, blank the node branched
+or was pruned. Steps a node never reached print `-`. The summary line is logged when
+the search finishes, and at DEBUG each node also gets a per-step block. The logger
+keeps no search state, so one instance serves any number of searches. A project that
+wants another sink (a progress file, a database, a plot) adds its own
+`BranchAndPriceObserver` to `observers`.
+
+A zero incumbent and zero bound show a `0.0%` gap; a zero incumbent with a nonzero
+bound shows `inf`, and a missing incumbent shows `-`.
 
 #### Files
 
-- `branch_and_price_config.py`: the search time limit, the node selector, the
-  branching rule, the master and pricing builders, the column generation, the
+- `branch_and_price_config.py`: the search time limit and clock, the node selector,
+  the branching rule, the master and pricing builders, the column generation, the
   node lower bound and incumbent generators, and the observers.
 - `branch_and_price_solver.py`: the tree loop, the per-node exploration, which
   applies the node's decisions to its models, and the solution extraction hook.
-- `explored_node.py` and `node_outcome.py`: what one node did and how it ended.
-- `branch_and_price_observer.py`: the search-start, per-node, and end-of-search hooks
-  the solver reports to.
-- `branching/branch_node.py`: branching decisions, relaxation bound and
-  `master_relaxation_solution`, and the root factory.
+- `explored_node.py` and `node_outcome.py`: what one node did, where its time went,
+  and how it ended.
+- `search_summary.py`: how the search ended.
+- `branch_and_price_observer.py`: the per-node and end-of-search hooks the solver
+  reports to.
+- `branching/branch_node.py`: branching decisions, relaxation bound,
+  `master_relaxation_solution` and its integrality, and the root factory.
 - `branching/branching_decision.py`: the branch choice that filters columns and
   enforces itself on the master and the pricer.
 - `branching/branching_rule/branching_rule.py`: the branching hook and child construction.
@@ -282,22 +295,21 @@ nonzero bound shows `inf`, and a missing incumbent shows `-`.
 - `column_generation/column_generation.py`: the solve-price-add interface.
 - `column_generation/standard_column_generation.py`: the shipped solve-price-add loop.
 - `column_generation/column_generation_status.py` and `column_generation_result.py`:
-  convergence status, bound, and round count.
+  convergence status, bound, round count, and new column count.
 - `bounding/`: the node lower bound interface.
 - `incumbent/`: `Incumbent` is an objective with the column values behind it, and the
   generator interface.
-- `progress/`: the shipped progress logging. `node_observations.py` is what the
-  wrappers measured on the node being explored, the `timed_*.py` wrappers each time one
-  component call into it, `progress_logging.py` the observer that installs them and logs
-  a row per node, `progress_logger.py` the log calls, `node_record.py` what is logged
-  about one node, `node_component.py` the timed steps, and `progress_table.py` the
-  header, the rows, the per-node debug block, and the summary.
+- `timing/`: `Clock` and its `SystemClock`, `NodeStep` the timed steps of a node, and
+  `StepTimer`, which splits a node's time into those steps.
+- `progress/`: the shipped progress logging. `progress_logger.py` is the observer that
+  logs a row per node and the summary, and `progress_table.py` renders the header, the
+  rows, the per-node debug block, and the summary.
 
 #### Tests
 
 Components scripted through the config (masters, pricers, and trees) test the
 generic loops: convergence, deduplication, pruning, incumbent selection, bounds,
-infeasibility, and timeouts.
+infeasibility, and timeouts on a fake clock.
 `test_branching_extensions.py` is a working example with a small covering master
 and finite pricing subproblems. Its rows, decisions, and dual data are defined only
 in the example. It checks multiple node decisions, coefficients for

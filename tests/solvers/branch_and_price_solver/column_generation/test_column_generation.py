@@ -23,6 +23,11 @@ from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_
 from template.solvers.branch_and_price_solver.column_generation.standard_column_generation import (
     StandardColumnGeneration,
 )
+from template.solvers.branch_and_price_solver.timing.node_step import NodeStep
+from template.solvers.branch_and_price_solver.timing.step_timer import StepTimer
+from tests.solvers.branch_and_price_solver.test_branch_and_price_solver import (
+    FakeClock,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,19 +102,28 @@ def test_column_generation_converges_after_pricing_returns_no_columns() -> None:
     master = ScriptedMasterProblem([201.0, 101.0])
     pricer = ScriptedPricingProblem([[column], []])
 
-    result = StandardColumnGeneration().run(master, pricer, ColumnPool())
+    step_timer = StepTimer(FakeClock())
+
+    result = StandardColumnGeneration().run(master, pricer, ColumnPool(), step_timer)
 
     assert result.status is ColumnGenerationStatus.CONVERGED
     assert result.bound == 101.0
     assert result.round_count == 2
+    assert result.new_column_count == 1
     assert master.added_columns == [column]
+    assert set(step_timer.get_seconds_by_step()) == {
+        NodeStep.MASTER_SOLVE,
+        NodeStep.PRICING,
+    }
 
 
 def test_pricing_convergence_with_an_infeasible_master_is_infeasible() -> None:
     master = ScriptedMasterProblem([1.0], feasible=False)
     pricer = ScriptedPricingProblem([[]])
 
-    result = StandardColumnGeneration().run(master, pricer, ColumnPool())
+    result = StandardColumnGeneration().run(
+        master, pricer, ColumnPool(), StepTimer(FakeClock())
+    )
 
     assert result.status is ColumnGenerationStatus.INFEASIBLE
     assert result.bound == math.inf
@@ -124,7 +138,7 @@ def test_only_known_columns_raise_instead_of_certifying_convergence() -> None:
     pricer = ScriptedPricingProblem([[known]])
 
     with pytest.raises(RuntimeError, match="only known columns"):
-        StandardColumnGeneration().run(master, pricer, pool)
+        StandardColumnGeneration().run(master, pricer, pool, StepTimer(FakeClock()))
 
 
 def test_duplicate_columns_are_deduplicated_before_reaching_the_master() -> None:
@@ -135,7 +149,9 @@ def test_duplicate_columns_are_deduplicated_before_reaching_the_master() -> None
     master = ScriptedMasterProblem([20.0, 15.0])
     pricer = ScriptedPricingProblem([[known, fresh], []])
 
-    result = StandardColumnGeneration().run(master, pricer, pool)
+    result = StandardColumnGeneration().run(
+        master, pricer, pool, StepTimer(FakeClock())
+    )
 
     assert result.status is ColumnGenerationStatus.CONVERGED
     assert master.added_columns == [fresh]

@@ -24,11 +24,13 @@ from template.solvers.branch_and_price_solver.column_generation.pricing.pricing_
 from template.solvers.branch_and_price_solver.incumbent.node_incumbent_generator import (
     NodeIncumbentGenerator,
 )
+from template.solvers.branch_and_price_solver.timing.clock import Clock
 
 
 @dataclass(frozen=True, slots=True)
 class BranchAndPriceConfig:
     time_limit_seconds: float
+    clock: Clock
 
     node_selector: NodeSelector
     branching_rule: BranchingRule

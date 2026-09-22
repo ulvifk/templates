@@ -11,3 +11,4 @@ class ColumnGenerationResult:
     bound: float  # math.inf when infeasible
 
     round_count: int
+    new_column_count: int  # columns this node added to the pool
