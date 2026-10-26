@@ -432,6 +432,11 @@ The builder, the prune, and the expansion are tested on tiny hand-built networks
 with fake nodes and a scripted calculator. Each real calculator gets a test per
 arc type on the arcs it emits from a given tail.
 
+## Java projects
+
+Gradle with the Kotlin DSL and the latest Java, Lombok, Spotless with Palantir
+Java Format, SpotBugs, and JUnit.
+
 ## Conventions that apply everywhere
 
 - Factories live in a separate `XxxFactory` class in its own file, in the same
