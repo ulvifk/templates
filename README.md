@@ -434,8 +434,8 @@ arc type on the arcs it emits from a given tail.
 
 ## Java projects
 
-Copy `java-gradle/` to the project root and rename `template` to the project
-package. `gradle formatAndCheck` formats, builds, and checks.
+Gradle with the Kotlin DSL and the latest Java, Lombok, Spotless with Palantir
+Java Format, SpotBugs, and JUnit.
 
 ## Conventions that apply everywhere
 
