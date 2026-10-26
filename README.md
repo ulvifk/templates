@@ -435,7 +435,7 @@ arc type on the arcs it emits from a given tail.
 ## Java projects
 
 Copy `java-gradle/` to the project root and rename `template` to the project
-package. `./gradlew formatAndCheck` formats, builds, and checks.
+package. `gradle formatAndCheck` formats, builds, and checks.
 
 ## Conventions that apply everywhere
 
