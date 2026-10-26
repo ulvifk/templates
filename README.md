@@ -434,22 +434,8 @@ arc type on the arcs it emits from a given tail.
 
 ## Java projects
 
-`java-gradle/` is the build setup for a Java project, taken from the 2DCSP-FL
-`java-port` branch. Copy its contents to the new project root, then rename
-`template` to the project package in `settings.gradle.kts`, the `mainClass` in
-`build.gradle.kts`, and the directory under `src/main/java`.
-
-- Gradle wrapper and a Java 27 toolchain, downloaded through the foojay resolver
-  when no local JDK 27 exists.
-- Libraries: Gurobi, Jackson, SLF4J with the simple binding, Lombok, and JUnit.
-- Spotless formats with Palantir Java Format; SpotBugs runs on `check` and
-  ignores the exposed-representation warnings, since collections are shared by
-  design and never defensively copied.
-- `./gradlew formatAndCheck` formats the sources, then compiles, tests, and runs
-  SpotBugs. `./gradlew run` starts `Main`.
-
-The package layout follows the Python one above: `model/data`,
-`model/solution`, `validation`, `feasibility`, and one package per solver.
+Copy `java-gradle/` to the project root and rename `template` to the project
+package. `./gradlew formatAndCheck` formats, builds, and checks.
 
 ## Conventions that apply everywhere
 
