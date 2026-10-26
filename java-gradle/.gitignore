@@ -1,0 +1,14 @@
+build/
+.gradle/
+out/
+
+.DS_Store
+.idea/
+.vscode/
+
+*.ilp
+*.lp
+*.log
+
+.claude/
+experiments/
